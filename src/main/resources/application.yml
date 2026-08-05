@@ -1,0 +1,13 @@
+spring:
+  application:
+    name:yang-ai-code-mother
+  server:
+    port:8123
+  servlet:
+    context-path:/api
+# springdoc-openapi????
+springdoc:
+  group-configs:
+    - group: 'default'
+      paths-to-match: '/**'
+      packages-to-scan: com.cg.yangaicodemother.controller
