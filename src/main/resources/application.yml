@@ -1,11 +1,18 @@
 spring:
   application:
-    name:yang-ai-code-mother
-  server:
-    port:8123
+    name: yang-ai-code-mother
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://localhost:3306/yang_ai_code_mother
+    username: root
+    password: 123456
+
+server:
+  port: 8224
   servlet:
-    context-path:/api
-# springdoc-openapi????
+    context-path: /api
+
+# springdoc-openapi 配置
 springdoc:
   group-configs:
     - group: 'default'
