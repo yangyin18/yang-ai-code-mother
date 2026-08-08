@@ -70,18 +70,33 @@
             <artifactId>mybatis-flex-codegen</artifactId>
             <version>1.11.8</version>
         </dependency>
+        <!-- langchain4j 不用 spring-boot-starter：langchain4j 1.18.1-beta28 的 starter 基于 Spring Boot 3.5 编译，
+             其 SpringRestClient 依赖 org.springframework.boot.http.client.ClientHttpRequestFactorySettings，
+             该类在 Spring Boot 4 已移除 → 启动即 NoClassDefFoundError，且目前官方尚无支持 Boot 4 的版本。
+             改用纯 langchain4j-open-ai(1.18.1) 核心包（默认 JDK HttpClient，不依赖 Spring），
+             ChatModel Bean 由 ChatModelConfig 手动构建。 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-open-ai</artifactId>
+            <version>1.18.1</version>
+        </dependency>
+        <!-- langchain4j 高层模块：提供 AiServices、@SystemMessage 等（open-ai 核心包不带） -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j</artifactId>
+            <version>1.18.1</version>
+        </dependency>
         <dependency>
             <groupId>com.github.xiaoymin</groupId>
             <artifactId>knife4j-openapi3-jakarta-spring-boot-starter</artifactId>
             <version>4.4.0</version>
         </dependency>
        
-        <dependency>
-            <groupId>com.zaxxer</groupId>
-            <artifactId>HikariCP</artifactId>
-            <version>4.0.3</version>
-        </dependency>
-
+        <!-- HikariCP 不显式声明版本：由 spring-boot-starter-jdbc 传递引入 Spring Boot 4.1.0 管理的兼容版本 -->
         <dependency>
             <groupId>com.mysql</groupId>
             <artifactId>mysql-connector-j</artifactId>
