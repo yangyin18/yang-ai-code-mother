@@ -29,11 +29,12 @@ const loading = ref(false)
 const rules = {
   username: [
     { required: true, message: '请输入用户名', trigger: 'blur' },
-    { min: 2, message: '用户名至少 2 个字符', trigger: 'blur' },
+    // 与后端 userRegister 一致:userAccount.length() < 4 会拒绝
+    { min: 4, message: '用户名至少 4 个字符', trigger: 'blur' },
   ],
   password: [
     { required: true, message: '请输入密码', trigger: 'blur' },
-    { min: 6, message: '密码至少 6 位', trigger: 'blur' },
+    { min: 8, message: '密码至少 8 位', trigger: 'blur' },
   ],
   confirmPassword: [
     { required: true, message: '请再次输入密码', trigger: 'blur' },
@@ -88,7 +89,7 @@ onMounted(() => {
         <a-input-password
           v-model:value="form.password"
           size="large"
-          placeholder="至少 6 位"
+          placeholder="至少 8 位"
         />
       </a-form-item>
 
@@ -123,12 +124,12 @@ onMounted(() => {
 }
 
 .switch-link {
-  color: #a5b4fc;
+  color: #1677ff;
   text-decoration: none;
   font-weight: 600;
 }
 
 .switch-link:hover {
-  color: #c7d2fe;
+  color: #a855f7;
 }
 </style>

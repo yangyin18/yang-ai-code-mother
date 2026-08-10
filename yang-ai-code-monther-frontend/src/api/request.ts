@@ -22,20 +22,22 @@ export interface ApiResponse<T = unknown> {
   message: string
 }
 
+/** 扩展请求配置:silent 表示失败时不弹全局错误提示(用于静默探测,如恢复登录态) */
+export interface RequestConfig extends AxiosRequestConfig {
+  silent?: boolean
+}
+
 /** 创建 axios 实例 */
 const service = axios.create({
-  // 后端 context-path 为 /api,开发环境由 vite 代理转发到 8123 端口
+  // 后端 context-path 为 /api,开发环境由 vite 代理转发到 8224 端口
   baseURL: '/api',
   timeout: 30000,
+  // 登录态走 session + Cookie,必须携带凭据跨域转发
+  withCredentials: true,
 })
 
 /** 请求拦截器:发送请求之前统一处理 */
 service.interceptors.request.use((config: InternalAxiosRequestConfig) => {
-  // 示例:从 localStorage 取出 token 注入请求头
-  // const token = localStorage.getItem('token')
-  // if (token) {
-  //   config.headers.Authorization = `Bearer ${token}`
-  // }
   return config
 })
 
@@ -47,13 +49,19 @@ service.interceptors.response.use(
     if (res.code === 0) {
       return res.data as unknown as AxiosResponse
     }
-    // 业务失败:统一弹提示并 reject
-    message.error(res.message || '请求失败')
+    // 业务失败:统一弹提示并 reject(静默请求不弹,由调用方自己处理)
+    const config = response.config as RequestConfig
+    if (!config.silent) {
+      message.error(res.message || '请求失败')
+    }
     return Promise.reject(new Error(res.message || '请求失败'))
   },
   (error) => {
     // 网络错误 / 超时等
-    message.error(error?.message || '网络异常,请稍后重试')
+    const config = error?.config as RequestConfig | undefined
+    if (!config?.silent) {
+      message.error(error?.message || '网络异常,请稍后重试')
+    }
     return Promise.reject(error)
   },
 )
@@ -65,8 +73,8 @@ service.interceptors.response.use(
  * 这里把返回类型断言为业务数据类型 T,调用方直接拿到数据。
  *
  * @example
- * const app = await request<GeneratedApp>({ url: '/app/generate', method: 'POST', data: { requirement } })
+ * const result = await request<CodeGenResultVO>({ url: '/app/generate', method: 'POST', data: { appId, requirement } })
  */
-export function request<T>(config: AxiosRequestConfig): Promise<T> {
+export function request<T>(config: RequestConfig): Promise<T> {
   return service.request(config) as Promise<T>
 }

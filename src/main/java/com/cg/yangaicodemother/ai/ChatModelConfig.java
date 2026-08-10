@@ -8,6 +8,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import java.util.Map;
+
 /**
  * 手动构建 ChatModel Bean。
  *
@@ -35,6 +37,17 @@ public class ChatModelConfig {
     @Value("${langchain4j.open-ai.chat-model.log-responses:false}")
     private Boolean logResponses;
 
+    /**
+     * 关闭 DeepSeek 推理模型的思考过程。
+     *
+     * <p>实测代码生成慢的根因：模型 deepseek-v4-flash 是推理模型，对代码生成提示词
+     * 先输出 1.4w~4.2w 字符的 reasoning_content 才输出正文，首个正文 token 要等 38~95s；
+     * 通过 customParameters 附加 {@code "thinking": {"type": "disabled"}} 后，
+     * 首个正文 token 降至 ~1.3s，总耗时从 ~95s 降到 ~10s。该参数对非推理模型无副作用。
+     */
+    private static final Map<String, Object> DISABLE_THINKING =
+            Map.of("thinking", Map.of("type", "disabled"));
+
     @Bean
     public ChatModel chatModel() {
         return OpenAiChatModel.builder()
@@ -43,6 +56,7 @@ public class ChatModelConfig {
                 .modelName(modelName)
                 .logRequests(logRequests)
                 .logResponses(logResponses)
+                .customParameters(DISABLE_THINKING)
                 .build();
     }
 
@@ -58,6 +72,7 @@ public class ChatModelConfig {
                 .modelName(modelName)
                 .logRequests(logRequests)
                 .logResponses(logResponses)
+                .customParameters(DISABLE_THINKING)
                 .build();
     }
 }

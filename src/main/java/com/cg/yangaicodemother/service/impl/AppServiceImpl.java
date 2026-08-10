@@ -13,8 +13,11 @@ import com.cg.yangaicodemother.model.dto.AppUpdateRequest;
 import com.cg.yangaicodemother.model.entity.App;
 import com.cg.yangaicodemother.model.enums.CodeGenTypeEnum;
 import com.cg.yangaicodemother.model.vo.AppVO;
+import com.cg.yangaicodemother.model.vo.DeployResult;
 import com.cg.yangaicodemother.model.vo.LoginUserVO;
 import com.cg.yangaicodemother.service.AppService;
+import com.cg.yangaicodemother.service.ChatHistoryService;
+import com.cg.yangaicodemother.service.DeployService;
 import com.cg.yangaicodemother.service.UserService;
 import com.mybatisflex.core.paginate.Page;
 import com.mybatisflex.core.query.QueryWrapper;
@@ -22,7 +25,9 @@ import com.mybatisflex.core.util.LambdaGetter;
 import com.mybatisflex.spring.service.impl.ServiceImpl;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Map;
@@ -59,6 +64,17 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
 
     @Resource
     private UserService userService;
+
+    @Resource
+    private DeployService deployService;
+
+    /** 删除应用时级联删除该应用的对话历史，避免数据冗余 */
+    @Resource
+    private ChatHistoryService chatHistoryService;
+
+    /** 部署站点公网前缀，用于给 AppVO 拼已部署应用的访问地址 */
+    @Value("${code.deploy.base-url:}")
+    private String deployBaseUrl;
 
     // ==================== 用户端：我的应用 ====================
 
@@ -108,6 +124,7 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public boolean deleteApp(Long id, HttpServletRequest request) {
         LoginUserVO loginUser = userService.getLoginUser(request);
         if (id == null) {
@@ -115,7 +132,10 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         }
         getOwnedApp(id, loginUser.getId());
         // mybatis-flex 逻辑删除：isDelete 标注了 @Column(isLogicDelete=true)，删后查询自动过滤
-        return this.removeById(id);
+        boolean result = this.removeById(id);
+        // 关联删除该应用的所有对话历史，避免数据冗余（与删除应用同一事务，失败一并回滚）
+        chatHistoryService.removeByAppId(id);
+        return result;
     }
 
     @Override
@@ -143,9 +163,9 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
     @Override
     public Page<AppVO> getFeaturedAppPage(AppQueryRequest queryRequest) {
         QueryWrapper queryWrapper = QueryWrapper.create();
-        // 精选 = 已部署（deployKey 非空）的应用，按优先级降序、创建时间降序
-        queryWrapper.where(App::getDeployKey).isNotNull();
-        queryWrapper.where(App::getDeployKey).ne("");
+        // 精选 = 管理员手动置顶（priority > 0）的应用，按优先级降序、创建时间降序。
+        // 用户部署应用不再自动进入广场，需管理员在「应用管理」设置优先级。
+        queryWrapper.where(App::getPriority).gt(0);
         if (queryRequest != null && StrUtil.isNotBlank(queryRequest.getName())) {
             queryWrapper.where(App::getAppName).like(queryRequest.getName());
         }
@@ -153,14 +173,51 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         return toVOPage(pageByRequest(queryRequest, USER_PAGE_SIZE_LIMIT, queryWrapper));
     }
 
+    @Override
+    public DeployResult deployApp(Long appId, HttpServletRequest request) {
+        LoginUserVO loginUser = userService.getLoginUser(request);
+        if (appId == null) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "应用 id 不能为空");
+        }
+        App app = getOwnedApp(appId, loginUser.getId());
+        // 发布文件到 nginx 站点根目录，并拼出访问地址
+        DeployResult result = deployService.deploy(app);
+        // 写回部署标识与部署时间。部署后不自动进入广场，需管理员在「应用管理」设置优先级
+        app.setDeployKey(result.deployKey());
+        app.setDeployedTime(result.deployedTime());
+        this.updateById(app);
+        return result;
+    }
+
+    @Override
+    public DeployResult redeployApp(Long appId) {
+        if (appId == null) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "应用 id 不能为空");
+        }
+        App app = this.mapper.selectOneById(appId);
+        if (app == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "应用不存在");
+        }
+        // 复用原 deployKey（访问地址稳定），把最新生成的代码覆盖到 nginx 站点
+        DeployResult result = deployService.deploy(app);
+        app.setDeployKey(result.deployKey());
+        app.setDeployedTime(result.deployedTime());
+        this.updateById(app);
+        return result;
+    }
+
     // ==================== 管理端：应用管理 ====================
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public boolean adminDeleteApp(Long id) {
         if (id == null) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "应用 id 不能为空");
         }
-        return this.removeById(id);
+        boolean result = this.removeById(id);
+        // 关联删除该应用的所有对话历史，避免数据冗余（与删除应用同一事务，失败一并回滚）
+        chatHistoryService.removeByAppId(id);
+        return result;
     }
 
     @Override
@@ -285,6 +342,9 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         appVO.setCodeGenType(app.getCodeGenType());
         appVO.setDeployKey(app.getDeployKey());
         appVO.setDeployedTime(app.getDeployedTime());
+        // 已部署应用拼出 nginx 访问地址，供前端跳转
+        appVO.setDeployUrl(StrUtil.isNotBlank(app.getDeployKey()) && StrUtil.isNotBlank(deployBaseUrl)
+                ? deployBaseUrl + "/" + app.getDeployKey() + "/" : null);
         appVO.setPriority(app.getPriority());
         appVO.setUserId(app.getUserId());
         appVO.setCreateTime(app.getCreateTime());

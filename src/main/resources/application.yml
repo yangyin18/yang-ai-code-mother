@@ -14,6 +14,15 @@ server:
   servlet:
     context-path: /api
 
+# 网站部署：生成的应用发布到 nginx，由 nginx 对外提供服务。
+# 注意：source-root 须与 CodeSaver.FILE_SAVE_ROOT_DIR 保持一致，保证「保存 → 部署」取到同一份文件；
+#       web-root / base-url 是本机 nginx 相关配置，换机器时按实际情况调整。
+code:
+  deploy:
+    source-root: ${user.dir}/tmp/code_output      # 生成代码输出根目录
+    web-root: E:/software/nginx-1.28.3/html/apps  # nginx 站点根目录，部署文件落到 {web-root}/{deployKey}/
+    base-url: http://localhost/apps               # 部署站点公网前缀，访问地址 = {base-url}/{deployKey}/
+
 # springdoc-openapi 配置
 springdoc:
   group-configs:

@@ -3,7 +3,8 @@ package com.cg.yangaicodemother.constant;
 /**
  * 用户常量。
  */
-public final class UserConstant {
+public final class
+UserConstant {
 
     private UserConstant() {
     }

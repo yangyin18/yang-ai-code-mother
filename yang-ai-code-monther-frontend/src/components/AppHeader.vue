@@ -24,6 +24,18 @@ function goRegister() {
   router.push('/register')
 }
 
+function goConversations() {
+  router.push('/conversations')
+}
+
+function goAdminApps() {
+  router.push('/admin/apps')
+}
+
+function goAdmin() {
+  router.push('/admin/chat')
+}
+
 /** 退出登录 */
 async function handleLogout() {
   await userStore.logoutUser()
@@ -40,8 +52,13 @@ async function handleLogout() {
         <span class="logo-text">AI 零代码平台</span>
       </div>
 
-      <!-- 已登录:用户信息 -->
+      <!-- 已登录:导航 + 用户信息 -->
       <div v-if="userStore.isLoggedIn" class="user-box">
+        <nav class="nav-links">
+          <a-button size="small" type="link" class="nav-link" @click="goConversations">我的对话</a-button>
+          <a-button v-if="userStore.userInfo?.userRole === 'admin'" size="small" type="link" class="nav-link" @click="goAdminApps">应用管理</a-button>
+          <a-button v-if="userStore.userInfo?.userRole === 'admin'" size="small" type="link" class="nav-link" @click="goAdmin">对话管理</a-button>
+        </nav>
         <div class="user-avatar">{{ userStore.avatarText }}</div>
         <span class="user-name">{{ userStore.userInfo?.username }}</span>
         <a-button size="small" type="text" @click="handleLogout">退出</a-button>
@@ -61,7 +78,7 @@ async function handleLogout() {
   position: sticky;
   top: 0;
   z-index: 100;
-  background: rgba(11, 15, 26, 0.72);
+  background: rgba(255, 255, 255, 0.78);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
   border-bottom: 1px solid var(--border);
@@ -92,13 +109,14 @@ async function handleLogout() {
   font-size: 17px;
   background: var(--gradient);
   border-radius: 10px;
-  box-shadow: 0 0 20px rgba(99, 102, 241, 0.45);
+  box-shadow: 0 0 20px rgba(22, 119, 255, 0.35);
 }
 
 .logo-text {
   font-size: 16px;
   font-weight: 600;
   letter-spacing: 0.2px;
+  color: var(--text);
 }
 
 /* 登录 / 注册按钮 */
@@ -125,12 +143,22 @@ async function handleLogout() {
   color: #fff;
   font-size: 13px;
   font-weight: 700;
-  box-shadow: 0 0 12px rgba(99, 102, 241, 0.4);
+  box-shadow: 0 0 12px rgba(22, 119, 255, 0.35);
 }
 
 .user-name {
   font-size: 14px;
   font-weight: 500;
   color: var(--text);
+}
+
+.nav-links {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.nav-link {
+  font-size: 13px;
 }
 </style>

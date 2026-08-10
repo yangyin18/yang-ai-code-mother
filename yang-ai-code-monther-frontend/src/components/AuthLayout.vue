@@ -78,12 +78,12 @@ defineProps<{
   }
 }
 
-/* 左:品牌区(渐变底 + 点阵) */
+/* 左:品牌区(浅蓝紫渐变底 + 点阵) */
 .auth-brand {
   padding: 44px 40px;
   background-image:
-    linear-gradient(160deg, rgba(99, 102, 241, 0.18), rgba(139, 92, 246, 0.08)),
-    radial-gradient(rgba(255, 255, 255, 0.08) 1px, transparent 1px);
+    linear-gradient(160deg, rgba(22, 119, 255, 0.1), rgba(168, 85, 247, 0.06)),
+    radial-gradient(rgba(21, 27, 38, 0.05) 1px, transparent 1px);
   background-size:
     100% 100%,
     22px 22px;
@@ -98,7 +98,7 @@ defineProps<{
   font-size: 22px;
   background: var(--gradient);
   border-radius: 13px;
-  box-shadow: 0 0 24px rgba(99, 102, 241, 0.5);
+  box-shadow: 0 0 24px rgba(22, 119, 255, 0.4);
   margin-bottom: 20px;
 }
 

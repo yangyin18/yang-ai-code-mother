@@ -1,43 +1,43 @@
 /**
- * 全局样式 + 深色设计系统
+ * 全局样式 + 浅色设计系统(风格对齐 miaoda.cn)
  *
  * 所有页面共享的设计变量都集中在这里:
  *   - 颜色语义(背景/面板/文字/主色)
- *   - 全局渐变光晕背景 + 点阵网格(大厂科技感)
+ *   - 全局浅色渐变光晕背景 + 点阵网格(清爽 SaaS 感)
  *   - 滚动条 / 文本选中等细节
  *
  * 页面里只用这些语义变量,后续想换主题只改这一处。
  */
 :root {
   /* 背景层级 */
-  --bg: #0b0f1a;
-  --bg-soft: #101626;
+  --bg: #ffffff;
+  --bg-soft: #f7f9fc;
 
-  /* 面板层级(毛玻璃表面) */
-  --panel: #121826;
-  --panel-2: #181f33;
-  --border: rgba(255, 255, 255, 0.08);
-  --border-strong: rgba(255, 255, 255, 0.16);
+  /* 面板层级(白色卡片) */
+  --panel: #ffffff;
+  --panel-2: #f0f3fa;
+  --border: #e5e9ed;
+  --border-strong: #d8dee6;
 
   /* 文字层级 */
-  --text: #e5e7eb;
-  --text-2: #9ca3af;
-  --text-3: #6b7280;
+  --text: #151b26;
+  --text-2: #495366;
+  --text-3: #818999;
 
-  /* 主色渐变 */
-  --primary: #6366f1;
-  --primary-2: #8b5cf6;
-  --gradient: linear-gradient(135deg, #6366f1, #8b5cf6);
+  /* 主色渐变(蓝 → 紫,取 miaoda 品牌色) */
+  --primary: #1677ff;
+  --primary-2: #a855f7;
+  --gradient: linear-gradient(135deg, #1677ff, #a855f7);
 
   /* 语义色 */
-  --success: #34d399;
-  --warning: #fbbf24;
+  --success: #10b981;
+  --warning: #f59e0b;
 
   /* 圆角与阴影 */
   --radius: 16px;
   --radius-sm: 10px;
-  --shadow: 0 8px 40px rgba(0, 0, 0, 0.45);
-  --glow: 0 0 0 1px rgba(99, 102, 241, 0.25), 0 8px 32px rgba(99, 102, 241, 0.28);
+  --shadow: 0 8px 40px rgba(21, 27, 38, 0.08);
+  --glow: 0 0 0 1px rgba(22, 119, 255, 0.18), 0 8px 32px rgba(22, 119, 255, 0.15);
 }
 
 * {
@@ -53,11 +53,11 @@ body,
 
 body {
   background-color: var(--bg);
-  /* 多层背景:顶部主色光晕 + 右下紫色光晕 + 点阵网格 */
+  /* 多层浅色背景:顶部淡蓝光晕 + 右下淡紫光晕 + 浅色点阵网格 */
   background-image:
-    radial-gradient(ellipse 70% 45% at 50% -10%, rgba(99, 102, 241, 0.18), transparent),
-    radial-gradient(ellipse 50% 35% at 100% 100%, rgba(139, 92, 246, 0.1), transparent),
-    radial-gradient(rgba(255, 255, 255, 0.06) 1px, transparent 1px);
+    radial-gradient(ellipse 70% 45% at 50% -10%, rgba(22, 119, 255, 0.06), transparent),
+    radial-gradient(ellipse 50% 35% at 100% 100%, rgba(168, 85, 247, 0.05), transparent),
+    radial-gradient(rgba(21, 27, 38, 0.04) 1px, transparent 1px);
   background-size:
     100% 100%,
     100% 100%,
@@ -76,12 +76,12 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.12);
+  background: rgba(21, 27, 38, 0.15);
   border-radius: 8px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(21, 27, 38, 0.25);
 }
 
 ::-webkit-scrollbar-track {
@@ -90,7 +90,7 @@ body {
 
 /* 文本选中 */
 ::selection {
-  background: rgba(99, 102, 241, 0.4);
+  background: rgba(22, 119, 255, 0.3);
   color: #fff;
 }
 
@@ -114,13 +114,13 @@ body {
   font-weight: 600;
   cursor: pointer;
   font-family: inherit;
-  box-shadow: 0 8px 24px rgba(99, 102, 241, 0.35);
+  box-shadow: 0 8px 24px rgba(22, 119, 255, 0.25);
   transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.2s;
 }
 
 .glow-btn:hover:not(:disabled) {
   transform: translateY(-1px);
-  box-shadow: 0 12px 34px rgba(99, 102, 241, 0.5);
+  box-shadow: 0 12px 34px rgba(22, 119, 255, 0.4);
 }
 
 .glow-btn:disabled {

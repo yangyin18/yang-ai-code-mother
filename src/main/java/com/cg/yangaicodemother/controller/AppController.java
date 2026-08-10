@@ -1,17 +1,23 @@
 package com.cg.yangaicodemother.controller;
 
+import cn.hutool.core.util.StrUtil;
 import com.cg.yangaicodemother.annotation.AuthCheck;
 import com.cg.yangaicodemother.common.BaseResponse;
 import com.cg.yangaicodemother.common.DeleteRequest;
 import com.cg.yangaicodemother.common.ResultUtils;
+import com.cg.yangaicodemother.core.CodeGenFacade;
+import com.cg.yangaicodemother.core.CodeGenResult;
+import com.cg.yangaicodemother.core.CodeGenStreamCallback;
 import com.cg.yangaicodemother.exception.ErrorCode;
 import com.cg.yangaicodemother.exception.ThrowUtils;
 import com.cg.yangaicodemother.model.dto.AppAdminQueryRequest;
 import com.cg.yangaicodemother.model.dto.AppAdminUpdateRequest;
 import com.cg.yangaicodemother.model.dto.AppCreateRequest;
+import com.cg.yangaicodemother.model.dto.AppGenerateRequest;
 import com.cg.yangaicodemother.model.dto.AppQueryRequest;
 import com.cg.yangaicodemother.model.dto.AppUpdateRequest;
 import com.cg.yangaicodemother.model.vo.AppVO;
+import com.cg.yangaicodemother.model.vo.DeployResult;
 import com.cg.yangaicodemother.service.AppService;
 import com.mybatisflex.core.paginate.Page;
 import jakarta.servlet.http.HttpServletRequest;
@@ -21,6 +27,13 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+
+import java.io.IOException;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * 应用接口。
@@ -31,6 +44,20 @@ import org.springframework.web.bind.annotation.RestController;
 public class AppController {
 
     private final AppService appService;
+
+    private final CodeGenFacade codeGenFacade;
+
+    /**
+     * 流式心跳调度器：SSE 首 token 可能较慢(模型侧波动)，每 5s 推一个 heartbeat，
+     * 让前端能确认连接存活、展示真实等待时间，避免"看起来卡死/假流式"。
+     * 守护线程 + 共享实例，不影响应用生命周期。
+     */
+    private static final ScheduledExecutorService SSE_HEARTBEAT_SCHEDULER =
+            Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "sse-heartbeat");
+                t.setDaemon(true);
+                return t;
+            });
 
     // ==================== 用户端：我的应用 ====================
 
@@ -121,7 +148,8 @@ public class AppController {
     }
 
     /**
-     * 分页查询精选的应用列表（用户）。精选 = 已部署的应用，按优先级降序。
+     * 分页查询精选的应用列表（用户）。精选 = 管理员手动置顶（priority &gt; 0）的应用，按优先级降序。
+     * 用户部署应用不再自动进入广场，需管理员在「应用管理」设置优先级。
      * 每页最多 20 个，支持按名称模糊查询。
      * GET /app/featured/list/page?pageNum=1&pageSize=20&name=待办
      *
@@ -136,6 +164,148 @@ public class AppController {
         }
         Page<AppVO> appPage = appService.getFeaturedAppPage(queryRequest);
         return ResultUtils.success(appPage);
+    }
+
+    // ==================== 代码生成 ====================
+
+    /**
+     * 为应用生成代码（同步）。使用应用的 initPrompt 作为基础指令、叠加本次需求调用 AI，
+     * 生成类型取应用的 codeGenType，代码保存到 {bizType}_{appId} 目录。
+     * POST /app/generate，body 示例：{"appId": 1, "requirement": "做一个登录页"}
+     *
+     * @param generateRequest 生成请求
+     * @return 生成结果（含代码内容与保存目录）
+     */
+    @PostMapping("/generate")
+    @AuthCheck
+    public BaseResponse<CodeGenResult> generate(@RequestBody AppGenerateRequest generateRequest) {
+        ThrowUtils.throwIf(generateRequest == null, ErrorCode.PARAMS_ERROR, "请求参数不能为空");
+        ThrowUtils.throwIf(generateRequest.getAppId() == null, ErrorCode.PARAMS_ERROR, "应用 id 不能为空");
+        ThrowUtils.throwIf(StrUtil.isBlank(generateRequest.getRequirement()),
+                ErrorCode.PARAMS_ERROR, "需求描述不能为空");
+        CodeGenResult result = codeGenFacade.generate(generateRequest.getRequirement(), generateRequest.getAppId());
+        return ResultUtils.success(result);
+    }
+
+    /**
+     * 为应用流式生成代码（SSE）。边生成边推送 message 事件（增量文本），
+     * 全部完成并落盘后推送 complete 事件（CodeGenResult），异常推送 error 事件。
+     * POST /app/generate/stream，body 示例：{"appId": 1, "requirement": "做一个登录页"}
+     *
+     * @param generateRequest 生成请求
+     * @return SSE 流
+     */
+    @PostMapping("/generate/stream")
+    @AuthCheck
+    public SseEmitter generateStream(@RequestBody AppGenerateRequest generateRequest) {
+        ThrowUtils.throwIf(generateRequest == null, ErrorCode.PARAMS_ERROR, "请求参数不能为空");
+        ThrowUtils.throwIf(generateRequest.getAppId() == null, ErrorCode.PARAMS_ERROR, "应用 id 不能为空");
+        ThrowUtils.throwIf(StrUtil.isBlank(generateRequest.getRequirement()),
+                ErrorCode.PARAMS_ERROR, "需求描述不能为空");
+
+        SseEmitter emitter = new SseEmitter(600_000L);
+
+        // 流生命周期标记：complete/error/timeout 时置 true，心跳与 onComplete 据此互斥
+        AtomicBoolean done = new AtomicBoolean(false);
+
+        // 首 token 前的保活心跳：每 5s 推一个 heartbeat 事件，让前端看到连接真实存活。
+        // 首 token 一旦到达(message 事件)即取消，避免与代码流抢调度。
+        final long[] heartbeatStart = {System.currentTimeMillis()};
+        java.util.concurrent.ScheduledFuture<?> heartbeat = SSE_HEARTBEAT_SCHEDULER.scheduleAtFixedRate(() -> {
+            if (done.get()) {
+                return;
+            }
+            try {
+                emitter.send(SseEmitter.event()
+                        .name("heartbeat")
+                        .data("{\"elapsedMs\":" + (System.currentTimeMillis() - heartbeatStart[0]) + "}"));
+            } catch (IOException e) {
+                done.set(true);
+                emitter.completeWithError(e);
+            }
+        }, 5, 5, TimeUnit.SECONDS);
+
+        emitter.onTimeout(() -> {
+            done.set(true);
+            heartbeat.cancel(false);
+            emitter.complete();
+        });
+        emitter.onError(e -> {
+            done.set(true);
+            heartbeat.cancel(false);
+            emitter.complete();
+        });
+
+        // 立即告知前端连接已建立（此时 LLM 首 token 可能还要等几秒到几十秒）
+        try {
+            emitter.send(SseEmitter.event().name("started").data("{}"));
+        } catch (IOException e) {
+            done.set(true);
+            heartbeat.cancel(false);
+            emitter.completeWithError(e);
+        }
+
+        CodeGenStreamCallback callback = new CodeGenStreamCallback() {
+            @Override
+            public void onPartial(String partialText) {
+                // 过滤空白增量 token：部分模型流式输出会先吐空串/纯空格片段，
+                // 前端逐条 append 会拼出多余空格。只跳过整段空白的片段，不做 trim，
+                // 以免破坏单词间空格与代码缩进。
+                if (StrUtil.isBlank(partialText)) {
+                    return;
+                }
+                // 首 token 已到达，心跳没用了
+                done.set(true);
+                heartbeat.cancel(false);
+                try {
+                    emitter.send(SseEmitter.event().name("message").data(partialText));
+                } catch (IOException e) {
+                    emitter.completeWithError(e);
+                }
+            }
+
+            @Override
+            public void onComplete(CodeGenResult result) {
+                done.set(true);
+                heartbeat.cancel(false);
+                try {
+                    emitter.send(SseEmitter.event().name("complete").data(result));
+                    emitter.complete();
+                } catch (IOException e) {
+                    emitter.completeWithError(e);
+                }
+            }
+
+            @Override
+            public void onError(Throwable error) {
+                done.set(true);
+                heartbeat.cancel(false);
+                emitter.completeWithError(error);
+            }
+        };
+        // TokenStream 内部异步回调，这里直接启动即可；同步校验异常（应用不存在等）会直接抛出
+        codeGenFacade.generateStream(generateRequest.getRequirement(), callback, generateRequest.getAppId());
+        return emitter;
+    }
+
+    // ==================== 网站部署 ====================
+
+    /**
+     * 部署自己的应用（用户）。把已生成的代码发布到 nginx，写回 deployKey 与部署时间。
+     * 部署后不自动进入广场，需管理员在「应用管理」设置优先级。
+     * POST /app/deploy，body 示例：{"id": 1}
+     *
+     * @param deleteRequest 部署请求（复用 DeleteRequest，只需 id）
+     * @param request       HttpServletRequest
+     * @return 部署结果（含 deployKey 与访问地址）
+     */
+    @PostMapping("/deploy")
+    @AuthCheck
+    public BaseResponse<DeployResult> deployApp(@RequestBody DeleteRequest deleteRequest, HttpServletRequest request) {
+        ThrowUtils.throwIf(deleteRequest == null || deleteRequest.getId() == null,
+                ErrorCode.PARAMS_ERROR, "应用 id 不能为空");
+        DeployResult result = appService.deployApp(deleteRequest.getId(), request);
+        return ResultUtils.success(result);
     }
 
     // ==================== 管理端：应用管理 ====================

@@ -26,4 +26,12 @@ public class AiCodeGeneratorServiceFactory {
                 .streamingChatModel(streamingChatModel)
                 .build();
     }
+
+    @Bean
+    public AiChatService aiChatService() {
+        return AiServices.builder(AiChatService.class)
+                .chatModel(chatModel)
+                .streamingChatModel(streamingChatModel)
+                .build();
+    }
 }

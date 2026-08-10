@@ -3,21 +3,23 @@
  * 结果页:分栏工作台(v0.dev 风格)
  *
  *   ┌──────────────────────────────────────────────┐
- *   │ ← 新建应用   应用名   [重新生成] [下载代码]      │ ← 工具条
+ *   │ ← 新建应用   应用名   [重新生成][下载代码][部署上线]│ ← 工具条
  *   ├──────────────────────┬───────────────────────┤
- *   │  实时预览 (模拟界面)   │  index.vue [复制]       │
+ *   │  实时预览 (iframe)    │  index.html [复制]      │
  *   └──────────────────────┴───────────────────────┘
  *
- * 学习点:
- *  1. highlight.js 按需注册语言做代码高亮(utils/highlight.ts)
- *  2. 预览区用「浅色应用卡片」对比深色工作台,制造真实应用被预览的感觉
- *  3. v-html 渲染高亮结果(highlight.js 输出已转义,安全)
+ * 连接真实后端后:
+ *  - 左侧预览区用 iframe 直接运行 AI 生成的代码(srcdoc,沙箱隔离)
+ *  - 工具条「部署上线」调用 POST /app/deploy 发布到 nginx,
+ *    成功后给出 http://localhost/apps/{deployKey}/ 访问地址
  */
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
+import { deployApp } from '@/api/generation'
 import { useGenerationStore } from '@/stores/generation'
 import { highlight } from '@/utils/highlight'
+import type { CodeFile } from '@/types'
 
 const router = useRouter()
 const store = useGenerationStore()
@@ -28,9 +30,33 @@ const app = computed(() => store.app)
 /** 当前选中的代码文件名 */
 const activeFileKey = ref('')
 
+/** 部署中标记 */
+const deploying = ref(false)
+
+/** 代码文件列表(由 html/css/js 代码拼出,文件名为空则按扩展名回退) */
+const files = computed<CodeFile[]>(() => {
+  if (!app.value) return []
+  const names = app.value.fileNames ?? []
+  const contents: Record<string, string> = {
+    'index.html': app.value.htmlCode,
+    'style.css': app.value.cssCode,
+    'script.js': app.value.jsCode,
+  }
+  const list: CodeFile[] = []
+  for (const n of names) {
+    const content = contents[n]
+    if (content) list.push({ name: n, content })
+  }
+  if (list.length > 0) return list
+  if (app.value.htmlCode) list.push({ name: 'index.html', content: app.value.htmlCode })
+  if (app.value.cssCode) list.push({ name: 'style.css', content: app.value.cssCode })
+  if (app.value.jsCode) list.push({ name: 'script.js', content: app.value.jsCode })
+  return list
+})
+
 /** 当前展示的代码文件 */
 const activeFile = computed(
-  () => app.value?.files.find((f) => f.name === activeFileKey.value) ?? null,
+  () => files.value.find((f) => f.name === activeFileKey.value) ?? null,
 )
 
 /** 高亮后的 HTML(用 v-html 渲染) */
@@ -38,14 +64,25 @@ const highlightedCode = computed(() =>
   activeFile.value ? highlight(activeFile.value.content, activeFile.value.name) : '',
 )
 
-/** 预览区交互次数(演示) */
-const previewClicks = ref(0)
-
-/** 预览按钮点击 */
-function handleAction(label: string) {
-  previewClicks.value += 1
-  message.success(`你点击了「${label}」,模拟预览共交互 ${previewClicks.value} 次`)
-}
+/**
+ * 拼出 iframe 预览文档:html 模式已含完整页面;
+ * multi_file 模式把 css/js 注入到对应位置,保证能独立渲染。
+ */
+const previewDoc = computed(() => {
+  if (!app.value) return ''
+  let doc = app.value.htmlCode
+  if (app.value.cssCode && !/<style/i.test(doc)) {
+    doc = doc.replace(/<head([^>]*)>/i, (m, attrs) => {
+      const css = app.value?.cssCode ?? ''
+      return `<head${attrs}>\n<style>${css}<\/style>`
+    })
+  }
+  if (app.value.jsCode && !/<script/i.test(doc)) {
+    const js = app.value?.jsCode ?? ''
+    doc = doc.replace(/<\/body>/i, `<script>${js}<\/script>\n<\/body>`)
+  }
+  return doc
+})
 
 /** 复制当前代码 */
 function handleCopy() {
@@ -57,7 +94,7 @@ function handleCopy() {
 /** 下载全部代码(拼接为一个文本文件) */
 function handleDownload() {
   if (!app.value) return
-  const all = app.value.files.map((f) => `// ===== ${f.name} =====\n${f.content}`).join('\n\n')
+  const all = files.value.map((f) => `// ===== ${f.name} =====\n${f.content}`).join('\n\n')
   const blob = new Blob([all], { type: 'text/plain;charset=utf-8' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
@@ -65,6 +102,26 @@ function handleDownload() {
   a.download = `${app.value.name}-生成的代码.txt`
   a.click()
   URL.revokeObjectURL(url)
+}
+
+/** 部署上线:未部署则调后端发布到 nginx,已部署则直接打开站点 */
+async function handleDeploy() {
+  if (!app.value) return
+  if (app.value.deployUrl) {
+    window.open(app.value.deployUrl, '_blank')
+    return
+  }
+  deploying.value = true
+  try {
+    const url = await deployApp(app.value.appId)
+    app.value.deployUrl = url
+    message.success('部署成功,已发布到 nginx')
+    window.open(url, '_blank')
+  } catch {
+    // 错误已由 request 拦截器统一提示
+  } finally {
+    deploying.value = false
+  }
 }
 
 /** 重新生成:清空状态回首页 */
@@ -84,7 +141,7 @@ onMounted(() => {
     router.replace('/')
     return
   }
-  activeFileKey.value = app.value.files[0]?.name ?? ''
+  activeFileKey.value = files.value[0]?.name ?? ''
 })
 </script>
 
@@ -95,53 +152,54 @@ onMounted(() => {
       <a-button size="small" type="text" @click="goHome">← 新建应用</a-button>
 
       <div class="toolbar-title">
-        <span class="tb-icon">{{ app.icon }}</span>
+        <span class="tb-icon">⚡</span>
         <span class="tb-name">{{ app.name }}</span>
-        <span class="tb-desc">{{ app.description }}</span>
+        <span class="tb-desc">{{ app.description || 'AI 生成的网页应用' }}</span>
       </div>
 
       <div class="toolbar-actions">
         <a-button size="small" @click="handleRegenerate">重新生成</a-button>
-        <a-button size="small" type="primary" @click="handleDownload">⬇ 下载代码</a-button>
+        <a-button size="small" @click="handleDownload">⬇ 下载代码</a-button>
+        <a-button
+          v-if="app.deployUrl"
+          size="small"
+          type="primary"
+          @click="handleDeploy"
+        >
+          🔗 打开网站
+        </a-button>
+        <a-button v-else size="small" type="primary" :loading="deploying" @click="handleDeploy">
+          🚀 部署上线
+        </a-button>
       </div>
+    </div>
+
+    <!-- 部署地址条 -->
+    <div v-if="app.deployUrl" class="deploy-bar">
+      <span class="deploy-dot" />已部署到 nginx:
+      <a
+        class="deploy-link"
+        :href="app.deployUrl"
+        target="_blank"
+        rel="noopener"
+      >{{ app.deployUrl }}</a>
     </div>
 
     <!-- 主体两栏 -->
     <div class="workspace-body">
-      <!-- 左:实时预览 -->
+      <!-- 左:实时预览(iframe 运行真实生成的代码) -->
       <section class="pane preview-pane">
         <div class="pane-header">
           <span>实时预览</span>
           <span class="live-badge"><i class="live-dot" />LIVE</span>
         </div>
         <div class="pane-content preview-content">
-          <!-- 模拟生成的应用界面(浅色卡片,对比深色工作台) -->
-          <div class="phone">
-            <div class="phone-bar" />
-            <div class="phone-header">{{ app.preview.title }}</div>
-            <div class="phone-stats">
-              <div v-for="s in app.preview.stats" :key="s.label" class="phone-stat">
-                <div class="stat-label">{{ s.label }}</div>
-                <div class="stat-value">{{ s.value }}</div>
-              </div>
-            </div>
-            <div class="phone-actions">
-              <button
-                v-for="a in app.preview.actions"
-                :key="a.key"
-                class="phone-btn"
-                @click="handleAction(a.label)"
-              >
-                {{ a.label }}
-              </button>
-            </div>
-            <div class="phone-records">
-              <div v-for="(r, i) in app.preview.records" :key="i" class="phone-record">
-                <span class="record-date">{{ r.date }}</span>
-                <span class="record-content">{{ r.content }}</span>
-              </div>
-            </div>
-          </div>
+          <iframe
+            class="preview-frame"
+            :srcdoc="previewDoc"
+            sandbox="allow-scripts allow-modals allow-same-origin allow-forms"
+            title="应用预览"
+          />
         </div>
       </section>
 
@@ -150,7 +208,7 @@ onMounted(() => {
         <div class="pane-header">
           <div class="code-tabs">
             <button
-              v-for="f in app.files"
+              v-for="f in files"
               :key="f.name"
               class="code-tab"
               :class="{ active: activeFileKey === f.name }"
@@ -188,7 +246,7 @@ onMounted(() => {
   gap: 12px;
   padding: 12px 16px;
   border-bottom: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(21, 27, 38, 0.02);
   flex-wrap: wrap;
 }
 
@@ -221,11 +279,44 @@ onMounted(() => {
   gap: 8px;
 }
 
+/* 部署地址条 */
+.deploy-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 16px;
+  border-bottom: 1px solid rgba(52, 211, 153, 0.4);
+  background: rgba(52, 211, 153, 0.14);
+  font-size: 13px;
+  color: #059669;
+  flex-wrap: wrap;
+}
+
+.deploy-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--success);
+  animation: blink 1.4s infinite;
+}
+
+.deploy-link {
+  color: #047857;
+  text-decoration: none;
+  word-break: break-all;
+  font-weight: 600;
+}
+
+.deploy-link:hover {
+  text-decoration: underline;
+  color: #065f46;
+}
+
 /* 主体两栏 */
 .workspace-body {
   display: grid;
-  grid-template-columns: minmax(320px, 38%) 1fr;
-  height: 640px;
+  grid-template-columns: minmax(320px, 42%) 1fr;
+  height: 660px;
 }
 
 @media (max-width: 860px) {
@@ -260,7 +351,7 @@ onMounted(() => {
   border-bottom: 1px solid var(--border);
   font-size: 13px;
   color: var(--text-2);
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(21, 27, 38, 0.02);
   flex-shrink: 0;
 }
 
@@ -290,118 +381,29 @@ onMounted(() => {
   animation: blink 1.4s infinite;
 }
 
-/* ---------- 预览区:模拟应用界面 ---------- */
+/* ---------- 预览区:真实运行生成的页面 ---------- */
 .preview-content {
-  padding: 28px 20px;
-  background-image: radial-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px);
-  background-size: 22px 22px;
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-}
-
-.phone {
-  width: 100%;
-  max-width: 300px;
+  padding: 0;
   background: #ffffff;
-  color: #1f2937;
-  border-radius: 18px;
-  overflow: hidden;
-  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
-  border: 1px solid rgba(255, 255, 255, 0.12);
 }
 
-.phone-bar {
-  height: 26px;
-  background: var(--gradient);
-}
-
-.phone-header {
-  padding: 14px 16px;
-  background: #f9fafb;
-  border-bottom: 1px solid #e5e7eb;
-  text-align: center;
-  font-weight: 700;
-  color: #111827;
-  font-size: 15px;
-}
-
-.phone-stats {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-  padding: 14px;
-}
-
-.phone-stat {
-  background: #f3f4f6;
-  border-radius: 10px;
-  padding: 10px;
-  text-align: center;
-}
-
-.stat-label {
-  font-size: 11px;
-  color: #6b7280;
-}
-
-.stat-value {
-  font-size: 16px;
-  font-weight: 800;
-  background: var(--gradient);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  margin-top: 2px;
-}
-
-.phone-actions {
-  padding: 0 14px 12px;
-}
-
-.phone-btn {
+.preview-frame {
   width: 100%;
-  padding: 11px;
+  height: 100%;
   border: none;
-  border-radius: 10px;
-  background: var(--gradient);
-  color: #fff;
-  font-weight: 700;
-  font-size: 14px;
-  cursor: pointer;
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  background: #fff;
 }
 
-.phone-btn:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 8px 20px rgba(99, 102, 241, 0.35);
-}
-
-.phone-records {
-  padding: 0 14px 16px;
-}
-
-.phone-record {
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 8px 0;
-  border-bottom: 1px dashed #e5e7eb;
-  font-size: 12px;
-}
-
-.phone-record:last-child {
-  border-bottom: none;
-}
-
-.record-date {
-  color: #9ca3af;
-  flex-shrink: 0;
-}
-
-/* ---------- 代码区 ---------- */
+/* ---------- 代码区(深色编辑器:浅色页面中刻意保留) ---------- */
 .code-pane {
   background: #0d1220;
+}
+
+/* 代码面板内的标题条/文件 tab 保持深色系,不随浅色主题 */
+.code-pane .pane-header {
+  background: #0d1220;
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+  color: #9ca3af;
 }
 
 .code-content {
@@ -419,7 +421,7 @@ onMounted(() => {
   border: none;
   border-radius: 8px;
   font-size: 13px;
-  color: var(--text-2);
+  color: #9ca3af;
   background: transparent;
   cursor: pointer;
   font-family: 'JetBrains Mono', 'Consolas', monospace;
@@ -431,7 +433,16 @@ onMounted(() => {
 }
 
 .code-tab.active {
-  background: rgba(99, 102, 241, 0.18);
+  background: rgba(22, 119, 255, 0.22);
+  color: #fff;
+}
+
+/* 代码面板标题条里的 antd 文字按钮(浅色主题下默认文字是深色,深色面板上不可读) */
+.code-pane .pane-header :deep(.ant-btn) {
+  color: #9ca3af;
+}
+
+.code-pane .pane-header :deep(.ant-btn:hover) {
   color: #fff;
 }
 

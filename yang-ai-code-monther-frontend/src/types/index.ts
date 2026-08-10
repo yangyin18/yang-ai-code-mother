@@ -1,55 +1,62 @@
 /**
  * 全局类型定义
  *
- * 集中存放数据模型,方便前后端数据结构对齐。
- * 这些类型既被 mock 数据使用,将来也会被真实后端接口使用。
+ * 集中存放数据模型,与后端接口数据结构对齐。
+ * 前端已接入真实后端(注册/登录 → 创建应用 → AI 生成 → nginx 部署)。
  */
 
 /**
- * 生成的代码文件
+ * 生成的代码文件(用于结果页代码区展示)
  */
 export interface CodeFile {
-  /** 文件名,例如 index.vue */
+  /** 文件名,例如 index.html / style.css / script.js */
   name: string
   /** 文件内容 */
   content: string
 }
 
 /**
- * 预览界面配置
- *
- * 结果页会根据这份「配置」渲染出一个可交互的模拟界面,
- * 用来模拟 AI 生成的完整应用长什么样。
+ * AI 生成并部署后的应用(对应后端 CodeGenResult + AppVO 的合并)
  */
-export interface PreviewConfig {
-  /** 界面顶部标题 */
-  title: string
-  /** 统计卡片(一排数字卡片) */
-  stats: { label: string; value: string }[]
-  /** 操作按钮 */
-  actions: { label: string; key: string }[]
-  /** 记录列表 */
-  records: { date: string; content: string }[]
+export interface GeneratedResult {
+  /** 应用 ID(后端 App.id,雪花 ID 以字符串传输避免精度丢失) */
+  appId: string
+  /** 应用名称 */
+  name: string
+  /** 功能描述 */
+  description: string
+  /** HTML 代码(html 模式为完整页面) */
+  htmlCode: string
+  /** CSS 代码(multi_file 模式才有) */
+  cssCode: string
+  /** JS 代码(multi_file 模式才有) */
+  jsCode: string
+  /** 生成的文件名列表 */
+  fileNames: string[]
+  /** 文件保存目录(后端绝对路径) */
+  saveDir: string
+  /** 已部署到 nginx 的访问地址,如 http://localhost/apps/a1b2c3d4/ */
+  deployUrl?: string
 }
 
 /**
- * AI 生成出来的应用
+ * AI 生成代码的原始结果(不含应用名称/部署地址,由 store 合并 AppVO 得到完整结果)
  */
-export interface GeneratedApp {
-  /** 应用唯一 ID */
-  id: string
-  /** 应用名称 */
-  name: string
-  /** 一句话描述 */
+export interface CodeGenPayload {
+  /** 应用 ID */
+  appId: string
+  /** 功能描述 */
   description: string
-  /** 图标(用 emoji 简单表示) */
-  icon: string
-  /** 匹配关键词:识别用户需求时用的关键词 */
-  keywords: string[]
-  /** 界面预览配置 */
-  preview: PreviewConfig
-  /** 生成的代码文件列表 */
-  files: CodeFile[]
+  /** HTML 代码 */
+  htmlCode: string
+  /** CSS 代码(multi_file 模式才有) */
+  cssCode: string
+  /** JS 代码(multi_file 模式才有) */
+  jsCode: string
+  /** 生成的文件名列表 */
+  fileNames: string[]
+  /** 文件保存目录 */
+  saveDir: string
 }
 
 /**
@@ -65,13 +72,15 @@ export interface GenerateStep {
 }
 
 /**
- * 登录用户信息
+ * 登录用户信息(对应后端 LoginUserVO,已脱敏)
  */
 export interface UserInfo {
   /** 用户 ID */
   id: string
-  /** 用户名 */
+  /** 用户名(账号) */
   username: string
-  /** 头像(暂用首字母渲染,预留 URL 字段) */
+  /** 头像地址(可选) */
   avatar?: string
+  /** 用户角色(user / admin),用于管理员入口展示与页面鉴权 */
+  userRole?: string
 }

@@ -1,8 +1,12 @@
 package com.cg.yangaicodemother.core;
 
 import com.cg.yangaicodemother.ai.AiCodeGeneratorService;
+import com.cg.yangaicodemother.core.saver.CodeSaveResult;
+import com.cg.yangaicodemother.core.saver.CodeSaver;
 import com.cg.yangaicodemother.exception.BusinessException;
 import com.cg.yangaicodemother.exception.ErrorCode;
+import com.cg.yangaicodemother.model.entity.App;
+import com.cg.yangaicodemother.service.AppService;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.service.TokenStream;
@@ -45,14 +49,19 @@ class CodeGenFacadeStreamingTest {
     @Mock
     private AiCodeGeneratorService aiCodeGeneratorService;
 
+    @Mock
+    private AppService appService;
+
     @InjectMocks
     private CodeGenFacade codeGenFacade;
 
-    private MockedStatic<CodeFileSaver> codeFileSaver;
+    private MockedStatic<CodeSaver> codeSaver;
 
     private AutoCloseable mockitoResources;
 
     private static final String SAVE_DIR = "E:/tmp/code_output/html_stream_1";
+
+    private static final Long APP_ID = 1L;
 
     /** 简单的回调收集器，把各个阶段的结果记下来供断言 */
     private static class CallbackCollector implements CodeGenStreamCallback {
@@ -79,12 +88,12 @@ class CodeGenFacadeStreamingTest {
     @BeforeEach
     void setUp() {
         mockitoResources = MockitoAnnotations.openMocks(this);
-        codeFileSaver = Mockito.mockStatic(CodeFileSaver.class);
+        codeSaver = Mockito.mockStatic(CodeSaver.class);
     }
 
     @AfterEach
     void tearDown() throws Exception {
-        codeFileSaver.close();
+        codeSaver.close();
         mockitoResources.close();
     }
 
@@ -120,11 +129,11 @@ class CodeGenFacadeStreamingTest {
     void generateHtmlStream_shouldForwardPartialAndComplete() {
         TokenStream tokenStream = mockTokenStream();
         when(aiCodeGeneratorService.generateCodeStream("博客")).thenReturn(tokenStream);
-        codeFileSaver.when(() -> CodeFileSaver.saveFiles(any(), anyString()))
-                .thenReturn(new File(SAVE_DIR));
+        codeSaver.when(() -> CodeSaver.saveFiles(any(), anyString(), any()))
+                .thenReturn(new CodeSaveResult(SAVE_DIR, List.of("index.html")));
         CallbackCollector callback = new CallbackCollector();
 
-        codeGenFacade.generateHtmlStream("博客", callback);
+        codeGenFacade.generateHtmlStream("博客", callback, APP_ID);
 
         // 增量文本被转发给调用方
         firePartial(tokenStream, "{\"htm");
@@ -142,7 +151,7 @@ class CodeGenFacadeStreamingTest {
         assertEquals(List.of("index.html"), callback.result.getFileNames());
 
         verify(aiCodeGeneratorService).generateCodeStream("博客");
-        codeFileSaver.verify(() -> CodeFileSaver.saveFiles(any(), anyString()));
+        codeSaver.verify(() -> CodeSaver.saveFiles(any(), anyString(), any()));
         verify(tokenStream).start();
     }
 
@@ -150,11 +159,11 @@ class CodeGenFacadeStreamingTest {
     void generateMultiFileStream_shouldParseAndComplete() {
         TokenStream tokenStream = mockTokenStream();
         when(aiCodeGeneratorService.generateMultiCodeStream("博客")).thenReturn(tokenStream);
-        codeFileSaver.when(() -> CodeFileSaver.saveFiles(any(), anyString()))
-                .thenReturn(new File(SAVE_DIR));
+        codeSaver.when(() -> CodeSaver.saveFiles(any(), anyString(), any()))
+                .thenReturn(new CodeSaveResult(SAVE_DIR, List.of("index.html", "style.css", "script.js")));
         CallbackCollector callback = new CallbackCollector();
 
-        codeGenFacade.generateMultiFileStream("博客", callback);
+        codeGenFacade.generateMultiFileStream("博客", callback, APP_ID);
 
         fireComplete(tokenStream,
                 "{\"htmlCode\":\"<html>\",\"cssCode\":\"body{}\",\"jsCode\":\"js()\",\"description\":\"多文件\"}");
@@ -166,7 +175,7 @@ class CodeGenFacadeStreamingTest {
         assertEquals("js()", callback.result.getJsCode());
         assertEquals(List.of("index.html", "style.css", "script.js"), callback.result.getFileNames());
 
-        codeFileSaver.verify(() -> CodeFileSaver.saveFiles(any(), anyString()));
+        codeSaver.verify(() -> CodeSaver.saveFiles(any(), anyString(), any()));
         verify(tokenStream).start();
     }
 
@@ -178,12 +187,12 @@ class CodeGenFacadeStreamingTest {
         when(aiCodeGeneratorService.generateCodeStream(anyString())).thenReturn(tokenStream);
         CallbackCollector callback = new CallbackCollector();
 
-        codeGenFacade.generateHtmlStream("博客", callback);
+        codeGenFacade.generateHtmlStream("博客", callback, APP_ID);
         fireComplete(tokenStream, "not a json");
 
         assertNull(callback.result);
         assertNotNull(callback.error, "非法 JSON 应回调 onError");
-        codeFileSaver.verifyNoInteractions();
+        codeSaver.verifyNoInteractions();
     }
 
     @Test
@@ -192,14 +201,14 @@ class CodeGenFacadeStreamingTest {
         when(aiCodeGeneratorService.generateCodeStream(anyString())).thenReturn(tokenStream);
         CallbackCollector callback = new CallbackCollector();
 
-        codeGenFacade.generateHtmlStream("博客", callback);
+        codeGenFacade.generateHtmlStream("博客", callback, APP_ID);
         fireComplete(tokenStream, "{\"htmlCode\":\" \",\"description\":\"空\"}");
 
         assertNull(callback.result);
         assertNotNull(callback.error);
         assertTrue(callback.error instanceof BusinessException);
         assertEquals(ErrorCode.SYSTEM_ERROR.getCode(), ((BusinessException) callback.error).getCode());
-        codeFileSaver.verifyNoInteractions();
+        codeSaver.verifyNoInteractions();
     }
 
     @Test
@@ -208,7 +217,7 @@ class CodeGenFacadeStreamingTest {
         when(aiCodeGeneratorService.generateCodeStream(anyString())).thenReturn(tokenStream);
         CallbackCollector callback = new CallbackCollector();
 
-        codeGenFacade.generateHtmlStream("博客", callback);
+        codeGenFacade.generateHtmlStream("博客", callback, APP_ID);
         fireError(tokenStream, new RuntimeException("网络中断"));
 
         assertNull(callback.result);
@@ -222,7 +231,7 @@ class CodeGenFacadeStreamingTest {
     void generateStream_unknownType_shouldThrowParamsError() {
         CallbackCollector callback = new CallbackCollector();
         BusinessException ex = assertThrows(BusinessException.class,
-                () -> codeGenFacade.generateStream("博客", "vue", callback));
+                () -> codeGenFacade.generateStream("博客", "vue", callback, APP_ID));
         assertEquals(ErrorCode.PARAMS_ERROR.getCode(), ex.getCode());
         verifyNoInteractions(aiCodeGeneratorService);
     }
@@ -230,8 +239,89 @@ class CodeGenFacadeStreamingTest {
     @Test
     void generateHtmlStream_blankMessage_shouldThrowParamsError() {
         CallbackCollector callback = new CallbackCollector();
-        assertThrows(BusinessException.class, () -> codeGenFacade.generateHtmlStream("", callback));
-        assertThrows(BusinessException.class, () -> codeGenFacade.generateHtmlStream(null, callback));
+        assertThrows(BusinessException.class, () -> codeGenFacade.generateHtmlStream("", callback, APP_ID));
+        assertThrows(BusinessException.class, () -> codeGenFacade.generateHtmlStream(null, callback, APP_ID));
+        verifyNoInteractions(aiCodeGeneratorService);
+    }
+
+    // ==================== 应用模式（按 appId 生成） ====================
+
+    @Test
+    void generateStream_appMode_html_shouldCombineInitPromptAndUseAppType() {
+        App app = new App();
+        app.setId(APP_ID);
+        app.setInitPrompt("你是前端专家");
+        app.setCodeGenType("html");
+        when(appService.getById(APP_ID)).thenReturn(app);
+
+        TokenStream tokenStream = mockTokenStream();
+        String prompt = "你是前端专家\n\n用户需求：\n做一个登录页";
+        when(aiCodeGeneratorService.generateCodeStream(prompt)).thenReturn(tokenStream);
+        codeSaver.when(() -> CodeSaver.saveFiles(any(), anyString(), any()))
+                .thenReturn(new CodeSaveResult(SAVE_DIR, List.of("index.html")));
+        CallbackCollector callback = new CallbackCollector();
+
+        codeGenFacade.generateStream("做一个登录页", callback, APP_ID);
+
+        fireComplete(tokenStream, "{\"htmlCode\":\"<html>app</html>\",\"description\":\"应用网页\"}");
+        assertNull(callback.error);
+        assertNotNull(callback.result);
+        assertEquals("html", callback.result.getCodeGenType());
+        assertEquals("<html>app</html>", callback.result.getHtmlCode());
+        verify(appService).getById(APP_ID);
+        verify(aiCodeGeneratorService).generateCodeStream(prompt);
+        verify(tokenStream).start();
+    }
+
+    @Test
+    void generateStream_appMode_multiFile_shouldUseAppType() {
+        App app = new App();
+        app.setId(APP_ID);
+        app.setInitPrompt("你是前端专家");
+        app.setCodeGenType("multi_file");
+        when(appService.getById(APP_ID)).thenReturn(app);
+
+        TokenStream tokenStream = mockTokenStream();
+        String prompt = "你是前端专家\n\n用户需求：\n做一个登录页";
+        when(aiCodeGeneratorService.generateMultiCodeStream(prompt)).thenReturn(tokenStream);
+        codeSaver.when(() -> CodeSaver.saveFiles(any(), anyString(), any()))
+                .thenReturn(new CodeSaveResult(SAVE_DIR, List.of("index.html", "style.css", "script.js")));
+        CallbackCollector callback = new CallbackCollector();
+
+        codeGenFacade.generateStream("做一个登录页", callback, APP_ID);
+
+        fireComplete(tokenStream,
+                "{\"htmlCode\":\"<html>\",\"cssCode\":\"body{}\",\"jsCode\":\"js()\",\"description\":\"多文件\"}");
+        assertNull(callback.error);
+        assertNotNull(callback.result);
+        assertEquals("multi_file", callback.result.getCodeGenType());
+        verify(appService).getById(APP_ID);
+        verify(aiCodeGeneratorService).generateMultiCodeStream(prompt);
+    }
+
+    @Test
+    void generateStream_appMode_appNotFound_shouldThrowNotFound() {
+        when(appService.getById(APP_ID)).thenReturn(null);
+
+        CallbackCollector callback = new CallbackCollector();
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> codeGenFacade.generateStream("做一个登录页", callback, APP_ID));
+        assertEquals(ErrorCode.NOT_FOUND_ERROR.getCode(), ex.getCode());
+        verifyNoInteractions(aiCodeGeneratorService);
+    }
+
+    @Test
+    void generateStream_appMode_missingType_shouldThrowParamsError() {
+        App app = new App();
+        app.setId(APP_ID);
+        app.setInitPrompt("你是前端专家");
+        app.setCodeGenType(null);
+        when(appService.getById(APP_ID)).thenReturn(app);
+
+        CallbackCollector callback = new CallbackCollector();
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> codeGenFacade.generateStream("做一个登录页", callback, APP_ID));
+        assertEquals(ErrorCode.PARAMS_ERROR.getCode(), ex.getCode());
         verifyNoInteractions(aiCodeGeneratorService);
     }
 }

@@ -7,6 +7,7 @@ import com.cg.yangaicodemother.model.dto.AppQueryRequest;
 import com.cg.yangaicodemother.model.dto.AppUpdateRequest;
 import com.cg.yangaicodemother.model.entity.App;
 import com.cg.yangaicodemother.model.vo.AppVO;
+import com.cg.yangaicodemother.model.vo.DeployResult;
 import com.mybatisflex.core.paginate.Page;
 import com.mybatisflex.core.service.IService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -67,13 +68,34 @@ public interface AppService extends IService<App> {
 
     /**
      * 分页查询精选的应用列表（用户）。
-     * 精选 = 已部署（deployKey 非空）的应用，按优先级降序、创建时间降序。
+     * 精选 = 管理员手动置顶（priority &gt; 0）的应用，按优先级降序、创建时间降序；
+     * 用户部署应用不再自动进入广场，需管理员在「应用管理」设置优先级。
      * 支持按名称模糊查询，每页最多 20 个。
      *
      * @param queryRequest 分页查询条件
      * @return 分页结果
      */
     Page<AppVO> getFeaturedAppPage(AppQueryRequest queryRequest);
+
+    /**
+     * 部署自己的应用（用户）。把已生成的代码发布到 nginx，写回 deployKey 与部署时间。
+     * 部署后不自动进入广场，需管理员在「应用管理」设置优先级。
+     *
+     * @param appId   应用 id
+     * @param request HttpServletRequest
+     * @return 部署结果（含 deployKey 与访问地址）
+     */
+    DeployResult deployApp(Long appId, HttpServletRequest request);
+
+    /**
+     * 重新部署已部署的应用（服务端内部使用，不做登录与归属校验）。
+     * 复用原 deployKey（访问地址稳定），把最新生成的代码覆盖到 nginx 站点。
+     * 供「对话即改代码」在聊天自动更新应用后调用；调用前需确认应用已部署。
+     *
+     * @param appId 应用 id
+     * @return 部署结果（含 deployKey 与访问地址）
+     */
+    DeployResult redeployApp(Long appId);
 
     // ==================== 管理端：应用管理 ====================
 

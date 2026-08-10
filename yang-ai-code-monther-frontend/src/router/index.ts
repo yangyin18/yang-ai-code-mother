@@ -34,6 +34,30 @@ const router = createRouter({
       meta: { title: '生成结果' },
     },
     {
+      path: '/chat/:appId',
+      name: 'chat',
+      component: () => import('@/views/ChatView.vue'),
+      meta: { title: '应用对话' },
+    },
+    {
+      path: '/conversations',
+      name: 'conversations',
+      component: () => import('@/views/MyConversationsView.vue'),
+      meta: { title: '我的对话' },
+    },
+    {
+      path: '/admin/chat',
+      name: 'chatAdmin',
+      component: () => import('@/views/ChatAdminView.vue'),
+      meta: { title: '对话管理' },
+    },
+    {
+      path: '/admin/apps',
+      name: 'appAdmin',
+      component: () => import('@/views/AppAdminView.vue'),
+      meta: { title: '应用管理' },
+    },
+    {
       path: '/login',
       name: 'login',
       component: () => import('@/views/LoginView.vue'),

@@ -3,24 +3,33 @@
  * 根组件
  *
  * 核心职责:
- *  1. 用 a-config-provider 全局注入 Antd 深色主题(学习点:antd 主题定制)
+ *  1. 用 a-config-provider 全局注入 Antd 浅色主题(学习点:antd 主题定制)
  *  2. 整体布局骨架:顶栏 + 路由出口
  */
+import { onMounted } from 'vue'
 import { theme } from 'ant-design-vue'
 import AppHeader from '@/components/AppHeader.vue'
+import { useUserStore } from '@/stores/user'
 
-/** Antd 主题配置:深色算法(darkAlgorithm)+ 品牌 token */
+const userStore = useUserStore()
+
+/** 启动时恢复登录态(session + Cookie):有本地登录标记才向后端探测 */
+onMounted(() => {
+  userStore.fetchLoginUser()
+})
+
+/** Antd 主题配置:浅色算法(defaultAlgorithm)+ 品牌 token(对齐 miaoda 蓝→紫) */
 const themeConfig = {
-  algorithm: theme.darkAlgorithm,
+  algorithm: theme.defaultAlgorithm,
   token: {
-    colorPrimary: '#6366f1', // 主色(品牌紫蓝)
-    colorInfo: '#6366f1',
-    colorLink: '#818cf8',
-    colorBgBase: '#0b0f1a', // 全局底色
-    colorBgContainer: '#121826', // 组件容器底色
-    colorBgElevated: '#181f33', // 弹出层(下拉/气泡)底色
-    colorBorder: 'rgba(255,255,255,0.12)',
-    colorTextBase: '#e5e7eb',
+    colorPrimary: '#1677ff', // 主色(品牌蓝)
+    colorInfo: '#1677ff',
+    colorLink: '#1677ff',
+    colorBgBase: '#ffffff', // 全局底色
+    colorBgContainer: '#ffffff', // 组件容器底色
+    colorBgElevated: '#ffffff', // 弹出层(下拉/气泡)底色
+    colorBorder: '#e5e9ed',
+    colorTextBase: '#151b26',
     borderRadius: 10, // 组件圆角
     fontFamily:
       "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC', 'Microsoft YaHei', sans-serif",

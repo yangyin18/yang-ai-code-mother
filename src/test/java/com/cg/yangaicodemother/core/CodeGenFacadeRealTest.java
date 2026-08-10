@@ -2,10 +2,12 @@ package com.cg.yangaicodemother.core;
 
 import com.cg.yangaicodemother.ai.AiCodeGeneratorServiceFactory;
 import com.cg.yangaicodemother.ai.ChatModelConfig;
+import com.cg.yangaicodemother.service.AppService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import java.io.File;
 
@@ -27,9 +29,13 @@ class CodeGenFacadeRealTest {
     @Autowired
     private CodeGenFacade codeGenFacade;
 
+    /** 门面依赖 AppService，但本测试不校验应用模式，用 mock 占位以满足依赖注入 */
+    @MockitoBean
+    private AppService appService;
+
     @Test
     void generateHtml() {
-        CodeGenResult result = codeGenFacade.generate("做一个简单的博客，不超过20行代码", "html");
+        CodeGenResult result = codeGenFacade.generate("做一个简单的博客，不超过20行代码", "html", 1L);
         System.out.println("========== 门面 generateHtml 结果 ==========");
         System.out.println("type        = " + result.getCodeGenType());
         System.out.println("description = " + result.getDescription());
@@ -47,7 +53,7 @@ class CodeGenFacadeRealTest {
 
     @Test
     void generateMultiFile() {
-        CodeGenResult result = codeGenFacade.generate("做一个简单的博客，不超过50行代码", "multi_file");
+        CodeGenResult result = codeGenFacade.generate("做一个简单的博客，不超过50行代码", "multi_file", 1L);
         System.out.println("========== 门面 generateMultiFile 结果 ==========");
         System.out.println("type        = " + result.getCodeGenType());
         System.out.println("description = " + result.getDescription());

@@ -49,6 +49,11 @@ public class AppVO implements Serializable {
     private LocalDateTime deployedTime;
 
     /**
+     * 已部署应用的 nginx 访问地址，如 http://localhost/apps/a1b2c3d4/
+     */
+    private String deployUrl;
+
+    /**
      * 优先级（数字越大越靠前）
      */
     private Integer priority;

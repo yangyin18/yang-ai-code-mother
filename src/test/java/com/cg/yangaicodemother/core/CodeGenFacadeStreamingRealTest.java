@@ -2,10 +2,12 @@ package com.cg.yangaicodemother.core;
 
 import com.cg.yangaicodemother.ai.AiCodeGeneratorServiceFactory;
 import com.cg.yangaicodemother.ai.ChatModelConfig;
+import com.cg.yangaicodemother.service.AppService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -31,6 +33,10 @@ class CodeGenFacadeStreamingRealTest {
     @Autowired
     private CodeGenFacade codeGenFacade;
 
+    /** 门面依赖 AppService，但本测试不校验应用模式，用 mock 占位以满足依赖注入 */
+    @MockitoBean
+    private AppService appService;
+
     @Test
     void generateHtmlStream_shouldStreamAndSave() throws Exception {
         CompletableFuture<CodeGenResult> future = new CompletableFuture<>();
@@ -52,7 +58,7 @@ class CodeGenFacadeStreamingRealTest {
             public void onError(Throwable error) {
                 future.completeExceptionally(error);
             }
-        });
+        }, 1L);
 
         CodeGenResult result = future.get(180, TimeUnit.SECONDS);
         System.out.println();
