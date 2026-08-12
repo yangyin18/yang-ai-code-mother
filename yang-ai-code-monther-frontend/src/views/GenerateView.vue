@@ -81,6 +81,24 @@ const activeTab = ref<'preview' | 'code'>('preview')
 /** 流式清洗后的代码(展示 + 预览) */
 const displayCode = computed(() => extractHtmlCode(store.streamingCode))
 
+/** 流式代码区滚动容器(自动滚到底部,最新代码始终可见) */
+const streamCodeRef = ref<HTMLElement | null>(null)
+
+watch(displayCode, () => {
+  if (streamCodeRef.value) {
+    const el = streamCodeRef.value
+    el.scrollTop = el.scrollHeight
+  }
+})
+
+/** 流式中切到「代码」tab 时,直接跳到最新代码位置 */
+watch(activeTab, async (tab) => {
+  if (tab === 'code' && store.streamingCode) {
+    await nextTick()
+    if (streamCodeRef.value) streamCodeRef.value.scrollTop = streamCodeRef.value.scrollHeight
+  }
+})
+
 /** 预览 iframe 内容:流式期间节流刷新,避免每 token 重建 iframe */
 const previewHtml = ref('')
 let previewTimer: ReturnType<typeof setInterval> | null = null
@@ -346,7 +364,7 @@ onBeforeUnmount(() => {
           v-if="activeTab === 'preview'"
           class="frame"
           :srcdoc="previewDoc"
-          sandbox="allow-scripts allow-same-origin allow-forms"
+          sandbox="allow-scripts allow-modals"
           title="实时预览"
         />
 
@@ -367,7 +385,7 @@ onBeforeUnmount(() => {
             </div>
             <pre class="code-block" v-html="highlightedCode"></pre>
           </template>
-          <pre v-else class="code-block plain">{{ displayCode || '// AI 正在生成代码,请稍候…' }}</pre>
+          <pre ref="streamCodeRef" v-else class="code-block plain">{{ displayCode || '// AI 正在生成代码,请稍候…' }}</pre>
         </div>
 
         <!-- 操作栏 -->
@@ -670,13 +688,13 @@ onBeforeUnmount(() => {
   background: #fff;
 }
 
-/* 代码面板(深色,浅色页面中刻意保留,明暗对比阅读更佳) */
+/* 代码面板(终端深色,统一全局 hljs 暗色 token) */
 .code-pane {
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  background: #0d1220;
+  background: #060a10;
 }
 
 .file-tabs {

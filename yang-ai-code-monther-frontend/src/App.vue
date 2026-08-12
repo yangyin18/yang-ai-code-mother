@@ -3,7 +3,7 @@
  * 根组件
  *
  * 核心职责:
- *  1. 用 a-config-provider 全局注入 Antd 浅色主题(学习点:antd 主题定制)
+ *  1. 用 a-config-provider 全局注入 Antd 深色主题(黑客/终端绿黑风)
  *  2. 整体布局骨架:顶栏 + 路由出口
  */
 import { onMounted } from 'vue'
@@ -18,19 +18,19 @@ onMounted(() => {
   userStore.fetchLoginUser()
 })
 
-/** Antd 主题配置:浅色算法(defaultAlgorithm)+ 品牌 token(对齐 miaoda 蓝→紫) */
+/** Antd 主题配置:深色算法(darkAlgorithm)+ 终端绿 token(对齐绿黑矩阵) */
 const themeConfig = {
-  algorithm: theme.defaultAlgorithm,
+  algorithm: theme.darkAlgorithm,
   token: {
-    colorPrimary: '#1677ff', // 主色(品牌蓝)
-    colorInfo: '#1677ff',
-    colorLink: '#1677ff',
-    colorBgBase: '#ffffff', // 全局底色
-    colorBgContainer: '#ffffff', // 组件容器底色
-    colorBgElevated: '#ffffff', // 弹出层(下拉/气泡)底色
-    colorBorder: '#e5e9ed',
-    colorTextBase: '#151b26',
-    borderRadius: 10, // 组件圆角
+    colorPrimary: '#00ff9d', // 主色(终端绿)
+    colorInfo: '#00ff9d',
+    colorLink: '#22d3ee',
+    colorBgBase: '#0a0e14', // 全局底色
+    colorBgContainer: '#0d141b', // 组件容器底色
+    colorBgElevated: '#10151c', // 弹出层(下拉/气泡)底色
+    colorBorder: '#1c2a38',
+    colorTextBase: '#d7e3ea',
+    borderRadius: 8, // 组件圆角(偏锐利,终端感)
     fontFamily:
       "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC', 'Microsoft YaHei', sans-serif",
   },

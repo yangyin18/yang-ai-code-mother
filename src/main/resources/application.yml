@@ -22,6 +22,15 @@ code:
     source-root: ${user.dir}/tmp/code_output      # 生成代码输出根目录
     web-root: E:/software/nginx-1.28.3/html/apps  # nginx 站点根目录，部署文件落到 {web-root}/{deployKey}/
     base-url: http://localhost/apps               # 部署站点公网前缀，访问地址 = {base-url}/{deployKey}/
+  # Vue 深度开发模式的 token 用量约束
+  # 目标：以生成「完整项目」为首要目的，token 不设实际瓶颈。
+  # 注意：该值同时是模型单轮 max_tokens（单文件大小上限）与 writeFile 工具的累计预算（整个项目上限）。
+  # 设为足够大的值，保证模型能写完所有页面与功能，而不是被预算截断成简化版；
+  # 代价是单次生成更耗时、API 费用更高。若 API 拒绝过大的 max_tokens，可单独调小单轮值。
+  vue:
+    max-tokens: 200000  # 单次 Vue 生成不实际约束：模型单轮 max_tokens + writeFile 工具累计预算
+    max-files: 100      # Vue 项目文件数上限（对应提示词「文件总数按需，通常 30~100」）
+    scaffold-on-generate: true  # 生成完成后黄金兜底：补缺失的关键文件 + 修复缺失引用（设为 false 可跳过）
 
 # springdoc-openapi 配置
 springdoc:

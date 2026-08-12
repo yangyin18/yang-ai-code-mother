@@ -29,4 +29,14 @@ public interface CodeGenStreamCallback {
      * @param error 异常
      */
     void onError(Throwable error);
+
+    /**
+     * Vue 项目模式下，每个项目文件写入成功后回调（可多次）。
+     * HTML / 多文件模式不触发，默认空实现，无需各调用方改动。
+     *
+     * @param path 项目内相对路径（如 src/App.vue）
+     */
+    default void onFileWritten(String path) {
+        // no-op
+    }
 }

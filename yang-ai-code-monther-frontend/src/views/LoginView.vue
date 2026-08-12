@@ -105,12 +105,13 @@ onMounted(() => {
 }
 
 .switch-link {
-  color: #1677ff;
+  color: var(--primary);
   text-decoration: none;
   font-weight: 600;
 }
 
 .switch-link:hover {
-  color: #a855f7;
+  color: var(--primary-2);
+  text-shadow: 0 0 10px rgba(0, 255, 157, 0.4);
 }
 </style>

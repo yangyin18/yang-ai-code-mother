@@ -1,6 +1,8 @@
 package com.cg.yangaicodemother.controller;
 
+import cn.hutool.core.io.FileUtil;
 import cn.hutool.core.util.StrUtil;
+import cn.hutool.core.util.ZipUtil;
 import com.cg.yangaicodemother.annotation.AuthCheck;
 import com.cg.yangaicodemother.common.BaseResponse;
 import com.cg.yangaicodemother.common.DeleteRequest;
@@ -8,20 +10,28 @@ import com.cg.yangaicodemother.common.ResultUtils;
 import com.cg.yangaicodemother.core.CodeGenFacade;
 import com.cg.yangaicodemother.core.CodeGenResult;
 import com.cg.yangaicodemother.core.CodeGenStreamCallback;
+import com.cg.yangaicodemother.exception.BusinessException;
 import com.cg.yangaicodemother.exception.ErrorCode;
 import com.cg.yangaicodemother.exception.ThrowUtils;
 import com.cg.yangaicodemother.model.dto.AppAdminQueryRequest;
 import com.cg.yangaicodemother.model.dto.AppAdminUpdateRequest;
 import com.cg.yangaicodemother.model.dto.AppCreateRequest;
+import com.cg.yangaicodemother.model.dto.AppEditStyleRequest;
+import com.cg.yangaicodemother.model.dto.AppEditTextRequest;
 import com.cg.yangaicodemother.model.dto.AppGenerateRequest;
 import com.cg.yangaicodemother.model.dto.AppQueryRequest;
 import com.cg.yangaicodemother.model.dto.AppUpdateRequest;
+import com.cg.yangaicodemother.model.vo.AppCodeVO;
 import com.cg.yangaicodemother.model.vo.AppVO;
 import com.cg.yangaicodemother.model.vo.DeployResult;
 import com.cg.yangaicodemother.service.AppService;
 import com.mybatisflex.core.paginate.Page;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -29,9 +39,12 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.io.File;
 import java.io.IOException;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -55,6 +68,17 @@ public class AppController {
     private static final ScheduledExecutorService SSE_HEARTBEAT_SCHEDULER =
             Executors.newSingleThreadScheduledExecutor(r -> {
                 Thread t = new Thread(r, "sse-heartbeat");
+                t.setDaemon(true);
+                return t;
+            });
+
+    /**
+     * 部署执行器：部署（尤其 Vue 首次 npm install）可能耗时数分钟，
+     * 放到独立线程跑，让 SSE 端点立刻返回、进度事件随部署推进逐个推给前端。
+     */
+    private static final ExecutorService DEPLOY_EXECUTOR =
+            Executors.newFixedThreadPool(2, r -> {
+                Thread t = new Thread(r, "app-deploy");
                 t.setDaemon(true);
                 return t;
             });
@@ -127,6 +151,61 @@ public class AppController {
         AppVO appVO = appService.getAppById(id);
         ThrowUtils.throwIf(appVO == null, ErrorCode.NOT_FOUND_ERROR, "应用不存在");
         return ResultUtils.success(appVO);
+    }
+
+    /**
+     * 查看应用已生成的代码文件（供「查看代码」弹窗）。本人 / 管理员 / 已部署应用可查看。
+     * GET /app/code?id=xxx
+     *
+     * @param id      应用 id
+     * @param request HttpServletRequest
+     * @return 代码内容（含 html/css/js 与文件名列表）
+     */
+    @GetMapping("/code")
+    @AuthCheck
+    public BaseResponse<AppCodeVO> getAppCode(Long id, HttpServletRequest request) {
+        ThrowUtils.throwIf(id == null, ErrorCode.PARAMS_ERROR, "应用 id 不能为空");
+        AppCodeVO appCodeVO = appService.getAppCode(id, request);
+        return ResultUtils.success(appCodeVO);
+    }
+
+    /**
+     * 直接修改应用代码里的文字（可视化编辑「选中元素 → 改文字 → 保存」，不调 AI）。
+     * POST /app/code/edit-text
+     * 把代码文件中出现的 oldText 全局替换为 newText 并写回，返回更新后的代码。
+     * 权限：仅应用本人 / 管理员可改。
+     *
+     * @param editTextRequest 原文字 + 新文字
+     * @param request         HttpServletRequest
+     * @return 更新后的代码（前端刷新预览与文件列表）
+     */
+    @PostMapping("/code/edit-text")
+    @AuthCheck
+    public BaseResponse<AppCodeVO> editAppCodeText(@RequestBody AppEditTextRequest editTextRequest,
+                                                   HttpServletRequest request) {
+        ThrowUtils.throwIf(editTextRequest == null, ErrorCode.PARAMS_ERROR, "请求参数不能为空");
+        AppCodeVO appCodeVO = appService.editAppCodeText(
+                editTextRequest.getAppId(), editTextRequest.getOldText(), editTextRequest.getNewText(), request);
+        return ResultUtils.success(appCodeVO);
+    }
+
+    /**
+     * 直接修改应用代码里目标元素的样式（可视化编辑「选中元素 → 改颜色/内边距/外边距 → 保存」，不调 AI）。
+     * POST /app/code/edit-style
+     * 在 index.html 里定位目标元素开标签，把 style 属性合并进其 style 属性并写回，返回更新后的代码。
+     * 权限：仅应用本人 / 管理员可改。
+     *
+     * @param editStyleRequest 应用 id + 元素定位信息 + 要改的样式属性
+     * @param request          HttpServletRequest
+     * @return 更新后的代码（前端刷新预览与文件列表）
+     */
+    @PostMapping("/code/edit-style")
+    @AuthCheck
+    public BaseResponse<AppCodeVO> editAppCodeStyle(@RequestBody AppEditStyleRequest editStyleRequest,
+                                                    HttpServletRequest request) {
+        ThrowUtils.throwIf(editStyleRequest == null, ErrorCode.PARAMS_ERROR, "请求参数不能为空");
+        AppCodeVO appCodeVO = appService.editAppCodeStyle(editStyleRequest, request);
+        return ResultUtils.success(appCodeVO);
     }
 
     /**
@@ -277,6 +356,20 @@ public class AppController {
             }
 
             @Override
+            public void onFileWritten(String path) {
+                // Vue 项目模式：每个文件写入后推 file 事件，只带路径不带内容，省传输
+                try {
+                    emitter.send(SseEmitter.event()
+                            .name("file")
+                            .data("{\"path\":\"" + escapeJson(path) + "\"}"));
+                } catch (IOException e) {
+                    done.set(true);
+                    heartbeat.cancel(false);
+                    emitter.completeWithError(e);
+                }
+            }
+
+            @Override
             public void onError(Throwable error) {
                 done.set(true);
                 heartbeat.cancel(false);
@@ -286,6 +379,52 @@ public class AppController {
         // TokenStream 内部异步回调，这里直接启动即可；同步校验异常（应用不存在等）会直接抛出
         codeGenFacade.generateStream(generateRequest.getRequirement(), callback, generateRequest.getAppId());
         return emitter;
+    }
+
+    // ==================== Vue 项目下载 ====================
+
+    /**
+     * 下载应用已生成的代码为 ZIP 包（Vue 项目是多文件目录，浏览器无法单文件下载）。
+     * 权限与「查看代码」一致：本人 / 管理员 / 已部署应用可下载。
+     * POST /app/download，body 示例：{"id": 1}
+     *
+     * @param downloadRequest 下载请求（复用 DeleteRequest，只需 id）
+     * @param request         HttpServletRequest
+     * @return ZIP 文件流（application/zip 附件）
+     */
+    @PostMapping("/download")
+    @AuthCheck
+    public ResponseEntity<byte[]> downloadApp(@RequestBody DeleteRequest downloadRequest, HttpServletRequest request) {
+        ThrowUtils.throwIf(downloadRequest == null || downloadRequest.getId() == null,
+                ErrorCode.PARAMS_ERROR, "应用 id 不能为空");
+        // 归属校验后拿到保存目录（html/multi_file/vue 通用）
+        String dirPath = appService.downloadAppCode(downloadRequest.getId(), request);
+        File srcDir = new File(dirPath);
+        if (!FileUtil.exist(srcDir) || !FileUtil.isDirectory(srcDir) || FileUtil.isEmpty(srcDir)) {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "该应用还没有生成过代码");
+        }
+        File zipFile = new File(FileUtil.getTmpDir(), "app_" + downloadRequest.getId() + "_" + System.nanoTime() + ".zip");
+        try {
+            // 把目录内容（不含目录本身）打进 zip，解压即得项目文件
+            ZipUtil.zip(zipFile, false, srcDir);
+            byte[] data = FileUtil.readBytes(zipFile);
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_OCTET_STREAM);
+            headers.setContentDispositionFormData("attachment", "app_" + downloadRequest.getId() + ".zip");
+            return new ResponseEntity<>(data, headers, HttpStatus.OK);
+        } finally {
+            FileUtil.del(zipFile);
+        }
+    }
+
+    /**
+     * SSE file 事件里 JSON 字符串的最小转义（路径由工具侧校验过，不含换行/制表符）。
+     */
+    private static String escapeJson(String s) {
+        if (s == null) {
+            return "";
+        }
+        return s.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
     // ==================== 网站部署 ====================
@@ -306,6 +445,83 @@ public class AppController {
                 ErrorCode.PARAMS_ERROR, "应用 id 不能为空");
         DeployResult result = appService.deployApp(deleteRequest.getId(), request);
         return ResultUtils.success(result);
+    }
+
+    /**
+     * 部署自己的应用（用户），实时流式反馈进度。
+     * 与 {@link #deployApp} 效果一致，但通过 SSE 把每个部署阶段和 npm 输出逐行推给前端：
+     * 事件有 {@code started} / {@code heartbeat} / {@code progress}（阶段或 npm 输出行）/
+     * {@code complete}（DeployResult JSON）/ {@code error}（失败原因）。
+     * POST /app/deploy/stream，body 示例：{"id": 1}
+     */
+    @PostMapping("/deploy/stream")
+    @AuthCheck
+    public SseEmitter deployAppStream(@RequestBody DeleteRequest deleteRequest, HttpServletRequest request) {
+        ThrowUtils.throwIf(deleteRequest == null || deleteRequest.getId() == null,
+                ErrorCode.PARAMS_ERROR, "应用 id 不能为空");
+        Long appId = deleteRequest.getId();
+        SseEmitter emitter = new SseEmitter(600_000L);
+        AtomicBoolean closed = new AtomicBoolean(false);
+        // 连接结束（超时/客户端断开）统一标记，后续回调直接跳过发送
+        emitter.onTimeout(() -> closed.set(true));
+        emitter.onError(e -> closed.set(true));
+        emitter.onCompletion(() -> closed.set(true));
+        // 部署可能数分钟无输出（首次 npm install 下载依赖），每 5s 保活心跳避免中间层断开
+        ScheduledFuture<?> heartbeat = SSE_HEARTBEAT_SCHEDULER.scheduleAtFixedRate(() -> {
+            if (closed.get()) {
+                return;
+            }
+            try {
+                emitter.send(SseEmitter.event().name("heartbeat").data("{}"));
+            } catch (IOException | IllegalStateException e) {
+                closed.set(true);
+            }
+        }, 5, 5, TimeUnit.SECONDS);
+        try {
+            emitter.send(SseEmitter.event().name("started").data("{}"));
+        } catch (IOException | IllegalStateException e) {
+            closed.set(true);
+            heartbeat.cancel(false);
+            return emitter;
+        }
+        DEPLOY_EXECUTOR.execute(() -> {
+            try {
+                DeployResult result = appService.deployAppStream(appId, request, msg -> {
+                    if (closed.get()) {
+                        return;
+                    }
+                    try {
+                        emitter.send(SseEmitter.event().name("progress").data(msg));
+                    } catch (IOException | IllegalStateException e) {
+                        closed.set(true);
+                    }
+                });
+                heartbeat.cancel(false);
+                if (!closed.get()) {
+                    try {
+                        emitter.send(SseEmitter.event().name("complete").data(result));
+                        emitter.complete();
+                    } catch (IOException | IllegalStateException e) {
+                        closed.set(true);
+                    }
+                }
+            } catch (Exception e) {
+                heartbeat.cancel(false);
+                if (!closed.get()) {
+                    try {
+                        // 错误详情可能是多行 npm 输出，SSE data 一行的换行会破坏帧结构，压平成单行
+                        String msg = e.getMessage() != null && StrUtil.isNotBlank(e.getMessage())
+                                ? e.getMessage().replaceAll("\\r?\\n", " ")
+                                : "部署失败";
+                        emitter.send(SseEmitter.event().name("error").data(msg));
+                        emitter.complete();
+                    } catch (IOException | IllegalStateException ignored) {
+                        // 连接已断开，无法再告知，忽略
+                    }
+                }
+            }
+        });
+        return emitter;
     }
 
     // ==================== 管理端：应用管理 ====================

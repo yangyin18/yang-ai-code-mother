@@ -38,6 +38,15 @@ public class ChatModelConfig {
     private Boolean logResponses;
 
     /**
+     * Vue 项目生成的单轮输出 token 上限（对应 codegen-vue-project 提示词「不设硬上限，以完整项目为准」）。
+     * 文件内容作为 writeFile 工具参数输出，也计入单轮 max_tokens，因此该值同时封顶单文件大小；
+     * 跨轮的累计用量由 {@link com.cg.yangaicodemother.ai.tools.VueProjectTokenBudget} 兜底。
+     * 默认设为足够大的值，保证模型能写完完整项目而不是被预算截断。
+     */
+    @Value("${code.vue.max-tokens:200000}")
+    private Integer vueMaxTokens;
+
+    /**
      * 关闭 DeepSeek 推理模型的思考过程。
      *
      * <p>实测代码生成慢的根因：模型 deepseek-v4-flash 是推理模型，对代码生成提示词
@@ -70,6 +79,27 @@ public class ChatModelConfig {
                 .baseUrl(baseUrl)
                 .apiKey(apiKey)
                 .modelName(modelName)
+                .logRequests(logRequests)
+                .logResponses(logResponses)
+                .customParameters(DISABLE_THINKING)
+                .build();
+    }
+
+    /**
+     * Vue 项目生成专用的流式 ChatModel。
+     *
+     * <p>与 {@link #streamingChatModel()} 唯一区别是设置了 {@code maxTokens}（{@code code.vue.max-tokens}）：
+     * Vue 生成走工具调用，模型会把整个文件内容作为 writeFile 工具参数输出，
+     * 单轮 max_tokens 就是该轮输出的硬上限，防止单个超大文件/超长文本刷爆用量。
+     * 其余配置（base-url / api-key / 禁用 thinking）与通用模型一致。
+     */
+    @Bean
+    public StreamingChatModel vueStreamingChatModel() {
+        return OpenAiStreamingChatModel.builder()
+                .baseUrl(baseUrl)
+                .apiKey(apiKey)
+                .modelName(modelName)
+                .maxTokens(vueMaxTokens)
                 .logRequests(logRequests)
                 .logResponses(logResponses)
                 .customParameters(DISABLE_THINKING)

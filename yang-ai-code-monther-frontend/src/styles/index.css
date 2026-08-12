@@ -1,43 +1,45 @@
 /**
- * 全局样式 + 浅色设计系统(风格对齐 miaoda.cn)
+ * 全局样式 + 绿黑矩阵设计系统(黑客/终端风)
  *
  * 所有页面共享的设计变量都集中在这里:
- *   - 颜色语义(背景/面板/文字/主色)
- *   - 全局浅色渐变光晕背景 + 点阵网格(清爽 SaaS 感)
+ *   - 颜色语义(背景/面板/文字/主色)—— 近黑底 + 终端绿 + 青色点缀
+ *   - 全局深色背景:黑底 + 细网格线 + 顶部绿晕(矩阵/终端感)
  *   - 滚动条 / 文本选中等细节
+ *   - 终端辅助类(.mono / .cursor-blink / .term-bar / .live-dot)
+ *   - 全局深色 highlight.js token 主题(统一所有代码块)
  *
- * 页面里只用这些语义变量,后续想换主题只改这一处。
+ * 页面里只用这些语义变量,换主题只改这一处。
  */
 :root {
-  /* 背景层级 */
-  --bg: #ffffff;
-  --bg-soft: #f7f9fc;
+  /* 背景层级(近黑,带一丝蓝绿) */
+  --bg: #070b10;
+  --bg-soft: #0a0e14;
 
-  /* 面板层级(白色卡片) */
-  --panel: #ffffff;
-  --panel-2: #f0f3fa;
-  --border: #e5e9ed;
-  --border-strong: #d8dee6;
+  /* 面板层级(深色终端面板) */
+  --panel: #0d141b;
+  --panel-2: #101a23;
+  --border: #1c2a38;
+  --border-strong: #2a3d4f;
 
-  /* 文字层级 */
-  --text: #151b26;
-  --text-2: #495366;
-  --text-3: #818999;
+  /* 文字层级(冷白 + 灰阶) */
+  --text: #d7e3ea;
+  --text-2: #8ba3b0;
+  --text-3: #5b7282;
 
-  /* 主色渐变(蓝 → 紫,取 miaoda 品牌色) */
-  --primary: #1677ff;
-  --primary-2: #a855f7;
-  --gradient: linear-gradient(135deg, #1677ff, #a855f7);
+  /* 主色(终端绿 → 青,矩阵风) */
+  --primary: #00ff9d;
+  --primary-2: #22d3ee;
+  --gradient: linear-gradient(135deg, #00ff9d, #22d3ee);
 
   /* 语义色 */
-  --success: #10b981;
-  --warning: #f59e0b;
+  --success: #00ff9d;
+  --warning: #ffb454;
 
-  /* 圆角与阴影 */
-  --radius: 16px;
-  --radius-sm: 10px;
-  --shadow: 0 8px 40px rgba(21, 27, 38, 0.08);
-  --glow: 0 0 0 1px rgba(22, 119, 255, 0.18), 0 8px 32px rgba(22, 119, 255, 0.15);
+  /* 圆角与阴影(偏锐利,终端感;克制低辉光,不过度发光) */
+  --radius: 12px;
+  --radius-sm: 8px;
+  --shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  --glow: 0 0 0 1px rgba(0, 255, 157, 0.16), 0 0 8px rgba(0, 255, 157, 0.06);
 }
 
 * {
@@ -53,15 +55,17 @@ body,
 
 body {
   background-color: var(--bg);
-  /* 多层浅色背景:顶部淡蓝光晕 + 右下淡紫光晕 + 浅色点阵网格 */
+  /* 多层深色背景:顶部绿晕 + 右下青晕 + 绿色细网格线(矩阵感,弱光克制) */
   background-image:
-    radial-gradient(ellipse 70% 45% at 50% -10%, rgba(22, 119, 255, 0.06), transparent),
-    radial-gradient(ellipse 50% 35% at 100% 100%, rgba(168, 85, 247, 0.05), transparent),
-    radial-gradient(rgba(21, 27, 38, 0.04) 1px, transparent 1px);
+    radial-gradient(ellipse 80% 50% at 50% -10%, rgba(0, 255, 157, 0.04), transparent),
+    radial-gradient(ellipse 50% 40% at 100% 100%, rgba(34, 211, 238, 0.03), transparent),
+    linear-gradient(rgba(0, 255, 157, 0.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 255, 157, 0.018) 1px, transparent 1px);
   background-size:
     100% 100%,
     100% 100%,
-    32px 32px;
+    42px 42px,
+    42px 42px;
   background-attachment: fixed;
   color: var(--text);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC',
@@ -69,32 +73,39 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* 细滚动条 */
+/* 细滚动条(深色) */
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(21, 27, 38, 0.15);
+  background: rgba(0, 255, 157, 0.13);
   border-radius: 8px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(21, 27, 38, 0.25);
+  background: rgba(0, 255, 157, 0.22);
 }
 
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 
-/* 文本选中 */
+/* 文本选中(终端绿) */
 ::selection {
-  background: rgba(22, 119, 255, 0.3);
-  color: #fff;
+  background: rgba(0, 255, 157, 0.35);
+  color: #06231a;
 }
 
-/* 通用工具类 */
+/* ==================== 通用工具类 ==================== */
+
+/* 等宽字体(终端/代码元素) */
+.mono {
+  font-family: 'JetBrains Mono', Consolas, 'Courier New', monospace;
+}
+
+/* 渐变文字(绿→青) */
 .gradient-text {
   background: var(--gradient);
   -webkit-background-clip: text;
@@ -102,25 +113,105 @@ body {
   color: transparent;
 }
 
-/* 通用流光渐变按钮(首页 / 登录 / 注册复用) */
+/* 闪烁光标(终端输入 / 流式打字) */
+@keyframes cursor-blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+.cursor-blink {
+  display: inline-block;
+  animation: cursor-blink 1s steps(2, start) infinite;
+  color: var(--primary);
+}
+
+/* 终端窗口标题栏(左上三圆点 + 标题) */
+.term-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: rgba(0, 0, 0, 0.35);
+  border-bottom: 1px solid var(--border);
+  font-family: 'JetBrains Mono', Consolas, 'Courier New', monospace;
+  font-size: 11px;
+  color: var(--text-2);
+  flex-shrink: 0;
+}
+
+.term-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.term-dot.red {
+  background: #ff5f56;
+}
+.term-dot.yellow {
+  background: #ffbd2e;
+}
+.term-dot.green {
+  background: #27c93f;
+}
+
+.term-title {
+  flex: 1;
+  text-align: center;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  letter-spacing: 0.3px;
+}
+
+/* 绿色 LIVE 状态点(脉冲) */
+@keyframes live-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    box-shadow: 0 0 6px 0 rgba(0, 255, 157, 0.9);
+  }
+  50% {
+    opacity: 0.5;
+    box-shadow: 0 0 2px 0 rgba(0, 255, 157, 0.4);
+  }
+}
+
+.live-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--success);
+  animation: live-pulse 1.4s ease-in-out infinite;
+}
+
+/* 通用流光渐变按钮(首页 / 登录 / 注册复用) —— 终端绿黑字 */
 .glow-btn {
   height: 44px;
   padding: 0 28px;
-  border: none;
-  border-radius: 12px;
+  border: 1px solid rgba(0, 255, 157, 0.6);
+  border-radius: 8px;
   background: var(--gradient);
-  color: #fff;
+  color: #04120c;
   font-size: 15px;
-  font-weight: 600;
+  font-weight: 700;
   cursor: pointer;
-  font-family: inherit;
-  box-shadow: 0 8px 24px rgba(22, 119, 255, 0.25);
+  font-family: 'JetBrains Mono', Consolas, 'Courier New', monospace;
+  letter-spacing: 0.5px;
+  box-shadow: 0 0 8px rgba(0, 255, 157, 0.14);
   transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.2s;
 }
 
 .glow-btn:hover:not(:disabled) {
   transform: translateY(-1px);
-  box-shadow: 0 12px 34px rgba(22, 119, 255, 0.4);
+  box-shadow: 0 0 12px rgba(0, 255, 157, 0.2);
 }
 
 .glow-btn:disabled {
@@ -130,4 +221,67 @@ body {
 
 .glow-btn--full {
   width: 100%;
+}
+
+/* ==================== 全局深色 highlight.js 主题 ====================
+ * 所有代码块(.code-block / .code-pane)统一用暗底 + 绿/青 token,
+ * 覆盖 highlight.js 默认浅色 token。 */
+.code-block,
+.code-pane .code-block {
+  background: #060a10;
+  color: #d7e3ea;
+}
+
+.code-block .hljs-comment,
+.code-block .hljs-quote {
+  color: #5b7282;
+  font-style: italic;
+}
+
+.code-block .hljs-string,
+.code-block .hljs-template-string,
+.code-block .hljs-attr,
+.code-block .hljs-regexp {
+  color: #7ee787;
+}
+
+.code-block .hljs-keyword,
+.code-block .hljs-selector-tag,
+.code-block .hljs-literal,
+.code-block .hljs-doctag {
+  color: #22d3ee;
+}
+
+.code-block .hljs-tag,
+.code-block .hljs-name,
+.code-block .hljs-selector-class {
+  color: #93c5fd;
+}
+
+.code-block .hljs-title,
+.code-block .hljs-title.function_,
+.code-block .hljs-section {
+  color: #7dd3fc;
+}
+
+.code-block .hljs-number,
+.code-block .hljs-symbol,
+.code-block .hljs-bullet {
+  color: #f9a8d4;
+}
+
+.code-block .hljs-built_in,
+.code-block .hljs-type,
+.code-block .hljs-class .hljs-title {
+  color: #5eead4;
+}
+
+.code-block .hljs-params,
+.code-block .hljs-variable {
+  color: #e5e7eb;
+}
+
+.code-block .hljs-meta,
+.code-block .hljs-meta .hljs-keyword {
+  color: #ffb454;
 }

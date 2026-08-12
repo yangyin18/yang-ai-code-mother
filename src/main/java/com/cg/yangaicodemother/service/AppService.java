@@ -3,14 +3,18 @@ package com.cg.yangaicodemother.service;
 import com.cg.yangaicodemother.model.dto.AppAdminQueryRequest;
 import com.cg.yangaicodemother.model.dto.AppAdminUpdateRequest;
 import com.cg.yangaicodemother.model.dto.AppCreateRequest;
+import com.cg.yangaicodemother.model.dto.AppEditStyleRequest;
 import com.cg.yangaicodemother.model.dto.AppQueryRequest;
 import com.cg.yangaicodemother.model.dto.AppUpdateRequest;
 import com.cg.yangaicodemother.model.entity.App;
+import com.cg.yangaicodemother.model.vo.AppCodeVO;
 import com.cg.yangaicodemother.model.vo.AppVO;
 import com.cg.yangaicodemother.model.vo.DeployResult;
 import com.mybatisflex.core.paginate.Page;
 import com.mybatisflex.core.service.IService;
 import jakarta.servlet.http.HttpServletRequest;
+
+import java.util.function.Consumer;
 
 /**
  * 应用 服务层。
@@ -58,6 +62,53 @@ public interface AppService extends IService<App> {
     AppVO getAppById(Long id);
 
     /**
+     * 查看应用已生成的代码文件（供「查看代码」弹窗）。
+     * 权限：应用本人 / 管理员 / 已部署（public 上线的应用，代码随站点公开）可查看。
+     *
+     * @param id      应用 id
+     * @param request HttpServletRequest
+     * @return 代码内容（无代码目录时 fileNames 为空）
+     */
+    AppCodeVO getAppCode(Long id, HttpServletRequest request);
+
+    /**
+     * 直接修改应用代码里的文字（可视化编辑「选中元素 → 改文字 → 保存」，不调 AI）。
+     *
+     * <p>在已生成的代码文件里把 {@code oldText} 全局替换为 {@code newText} 并写回，
+     * 其余代码原样保留（小幅度修改）。权限：仅应用本人 / 管理员可改（已部署公开用户不能改他人代码）。
+     *
+     * @param appId   应用 id
+     * @param oldText 原文字（须在代码文件中出现，否则报错）
+     * @param newText 新文字
+     * @param request HttpServletRequest
+     * @return 更新后的代码（含 html/css/js 与文件名列表，前端刷新预览用）
+     */
+    AppCodeVO editAppCodeText(Long appId, String oldText, String newText, HttpServletRequest request);
+
+    /**
+     * 直接修改应用代码里目标元素的样式（可视化编辑「选中元素 → 改颜色/内边距/外边距 → 保存」，不调 AI）。
+     *
+     * <p>在已生成的 index.html 里定位目标元素开标签（锚定优先级：id &gt; 元素文本 &gt; class 首段），
+     * 把 {@code style} 属性合并进该元素 style 属性（同名覆盖、其余内联样式保留），其余代码原样不动。
+     * 权限：仅应用本人 / 管理员可改（已部署公开用户不能改他人代码）。
+     *
+     * @param editStyleRequest 应用 id + 元素定位信息 + 要改的样式属性
+     * @param request          HttpServletRequest
+     * @return 更新后的代码（含 html/css/js 与文件名列表，前端刷新预览用）
+     */
+    AppCodeVO editAppCodeStyle(AppEditStyleRequest editStyleRequest, HttpServletRequest request);
+
+    /**
+     * 定位应用已生成代码的保存目录（供下载 ZIP 包）。权限与 {@link #getAppCode} 一致：
+     * 本人 / 管理员 / 已部署应用可下载。目录可能不存在（还没生成过代码），由调用方判空。
+     *
+     * @param id      应用 id
+     * @param request HttpServletRequest
+     * @return 保存目录绝对路径
+     */
+    String downloadAppCode(Long id, HttpServletRequest request);
+
+    /**
      * 分页查询自己的应用列表（用户）。支持按名称模糊查询，每页最多 20 个。
      *
      * @param queryRequest 分页查询条件
@@ -88,6 +139,18 @@ public interface AppService extends IService<App> {
     DeployResult deployApp(Long appId, HttpServletRequest request);
 
     /**
+     * 部署自己的应用（用户），支持实时进度回调（供 SSE 流式部署展示）。
+     * 与 {@link #deployApp} 逻辑完全一致，仅多一个进度回调：
+     * 每个部署阶段（修复引用 / 安装依赖 / 构建 / 发布 / 完成）以及 npm 输出的每一行都会回调。
+     *
+     * @param appId    应用 id
+     * @param request  HttpServletRequest
+     * @param progress 部署进度回调，可为 null
+     * @return 部署结果（含 deployKey 与访问地址）
+     */
+    DeployResult deployAppStream(Long appId, HttpServletRequest request, Consumer<String> progress);
+
+    /**
      * 重新部署已部署的应用（服务端内部使用，不做登录与归属校验）。
      * 复用原 deployKey（访问地址稳定），把最新生成的代码覆盖到 nginx 站点。
      * 供「对话即改代码」在聊天自动更新应用后调用；调用前需确认应用已部署。
@@ -96,6 +159,16 @@ public interface AppService extends IService<App> {
      * @return 部署结果（含 deployKey 与访问地址）
      */
     DeployResult redeployApp(Long appId);
+
+    /**
+     * 重新部署已部署的应用，支持实时进度回调（供「对话即改代码」自动更新时流式反馈部署进度）。
+     * 与 {@link #redeployApp} 逻辑一致，仅多一个进度回调：每个部署阶段与 npm 输出逐行回调。
+     *
+     * @param appId    应用 id
+     * @param progress 部署进度回调，可为 null
+     * @return 部署结果（含 deployKey 与访问地址）
+     */
+    DeployResult redeployAppStream(Long appId, Consumer<String> progress);
 
     // ==================== 管理端：应用管理 ====================
 

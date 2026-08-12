@@ -1,6 +1,7 @@
 package com.cg.yangaicodemother.core.parser;
 
 import cn.hutool.core.util.StrUtil;
+import com.cg.yangaicodemother.core.CodeSanitizer;
 import com.cg.yangaicodemother.model.enums.CodeGenTypeEnum;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -85,19 +86,21 @@ public final class CodeParser {
         // ① JSON：大多数时候模型会遵守 prompt 里的严格 JSON 约定
         CodeParseResult jsonResult = tryParseJson(rawText);
         if (jsonResult != null) {
-            return jsonResult;
+            // 统一净化：移除生成代码里的一切外部链接与跳转（安全兜底）
+            return CodeSanitizer.sanitize(jsonResult);
         }
 
         // ② Markdown：不守规矩时的常见形态
         CodeParseResult markdownResult = tryParseMarkdown(rawText, type);
         if (markdownResult != null) {
-            return markdownResult;
+            return CodeSanitizer.sanitize(markdownResult);
         }
 
         // ③ 裸 HTML：文本整体就是页面
         String trimmed = rawText.trim();
         if (looksLikeHtml(trimmed)) {
-            return new CodeParseResult(List.of(new CodeFile("index.html", trimmed)), null);
+            CodeParseResult bare = new CodeParseResult(List.of(new CodeFile("index.html", trimmed)), null);
+            return CodeSanitizer.sanitize(bare);
         }
 
         throw new CodeParserException("未能从模型输出中解析出任何代码");

@@ -1,5 +1,6 @@
 package com.cg.yangaicodemother.core;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.Builder;
 import lombok.Data;
 
@@ -41,8 +42,10 @@ public class CodeGenResult {
     private String jsCode;
 
     /**
-     * 文件保存目录（绝对路径）
+     * 文件保存目录（服务端绝对路径，仅供服务端内部使用）。
+     * {@code @JsonIgnore}：绝不序列化给客户端，避免把服务器上的绝对路径暴露给用户。
      */
+    @JsonIgnore
     private String saveDir;
 
     /**

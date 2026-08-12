@@ -1,20 +1,25 @@
 package com.cg.yangaicodemother.service.impl;
 
+import cn.hutool.core.io.FileUtil;
 import cn.hutool.core.util.StrUtil;
 import com.cg.yangaicodemother.common.PageRequest;
+import com.cg.yangaicodemother.core.editor.HtmlStyleEditor;
 import com.cg.yangaicodemother.exception.BusinessException;
 import com.cg.yangaicodemother.exception.ErrorCode;
 import com.cg.yangaicodemother.mapper.AppMapper;
 import com.cg.yangaicodemother.model.dto.AppAdminQueryRequest;
 import com.cg.yangaicodemother.model.dto.AppAdminUpdateRequest;
 import com.cg.yangaicodemother.model.dto.AppCreateRequest;
+import com.cg.yangaicodemother.model.dto.AppEditStyleRequest;
 import com.cg.yangaicodemother.model.dto.AppQueryRequest;
 import com.cg.yangaicodemother.model.dto.AppUpdateRequest;
 import com.cg.yangaicodemother.model.entity.App;
 import com.cg.yangaicodemother.model.enums.CodeGenTypeEnum;
+import com.cg.yangaicodemother.model.vo.AppCodeVO;
 import com.cg.yangaicodemother.model.vo.AppVO;
 import com.cg.yangaicodemother.model.vo.DeployResult;
 import com.cg.yangaicodemother.model.vo.LoginUserVO;
+import com.cg.yangaicodemother.model.vo.ProjectFileVO;
 import com.cg.yangaicodemother.service.AppService;
 import com.cg.yangaicodemother.service.ChatHistoryService;
 import com.cg.yangaicodemother.service.DeployService;
@@ -29,8 +34,15 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.io.File;
+import java.nio.charset.StandardCharsets;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 /**
@@ -76,6 +88,10 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
     @Value("${code.deploy.base-url:}")
     private String deployBaseUrl;
 
+    /** 生成代码保存根目录（code.deploy.source-root，默认 {user.dir}/tmp/code_output），查看代码时据此定位 {bizType}_{appId} 子目录 */
+    @Value("${code.deploy.source-root:}")
+    private String codeSourceRoot;
+
     // ==================== 用户端：我的应用 ====================
 
     @Override
@@ -99,6 +115,10 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         app.setCodeGenType(createRequest.getCodeGenType());
         app.setPriority(0);
         app.setUserId(loginUser.getId());
+        // 显式初始化时间戳：不依赖 DB 默认值，保证「我的应用」按 updateTime 排序时新应用也有值
+        LocalDateTime now = LocalDateTime.now();
+        app.setCreateTime(now);
+        app.setUpdateTime(now);
 
         // 3. 保存
         boolean saveResult = this.save(app);
@@ -148,6 +168,161 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
     }
 
     @Override
+    public AppCodeVO getAppCode(Long id, HttpServletRequest request) {
+        if (id == null) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "应用 id 不能为空");
+        }
+        App app = this.mapper.selectOneById(id);
+        if (app == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "应用不存在");
+        }
+        // 权限：本人 / 管理员 / 已部署（public 上线）可查看；其他人不允许看未上线应用的代码
+        checkCodeViewPermission(app, userService.getLoginUser(request), "查看");
+
+        // 按 {codeGenType}_{appId} 定位代码目录（默认 html），递归读取全部文件
+        String dirPath = resolveCodeDir(app);
+        Map<String, String> contents = readProjectFiles(dirPath);
+        return buildAppCodeVO(app, contents);
+    }
+
+    @Override
+    public AppCodeVO editAppCodeText(Long appId, String oldText, String newText, HttpServletRequest request) {
+        if (appId == null) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "应用 id 不能为空");
+        }
+        if (StrUtil.isBlank(oldText)) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "原文字不能为空");
+        }
+        if (StrUtil.isBlank(newText)) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "新文字不能为空");
+        }
+        // 只允许本人 / 管理员修改；已部署公开用户只能查看、不能改他人代码
+        App app = this.mapper.selectOneById(appId);
+        if (app == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "应用不存在");
+        }
+        checkCodeEditPermission(app, userService.getLoginUser(request));
+
+        String dirPath = resolveCodeDir(app);
+        Map<String, String> contents = readProjectFiles(dirPath);
+        if (contents.isEmpty()) {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "该应用还没有生成过代码");
+        }
+        boolean changed = false;
+        for (Map.Entry<String, String> e : contents.entrySet()) {
+            String content = e.getValue();
+            if (content != null && content.contains(oldText)) {
+                // 只做文字级全局替换：其余内容原样保留（不调 AI 的小幅度修改）
+                String updated = content.replace(oldText, newText);
+                FileUtil.writeString(updated, new File(dirPath, e.getKey()), StandardCharsets.UTF_8);
+                changed = true;
+            }
+        }
+        if (!changed) {
+            throw new BusinessException(ErrorCode.OPERATION_ERROR,
+                    "没有在代码中找到要修改的文字，可能该元素包含图标/子元素或已是最新，请刷新页面重试");
+        }
+        // 小改动也算一次更新：刷新应用更新时间，让「我的应用」按最近活跃置顶
+        touchAppUpdateTime(app.getId());
+        // 返回替换后的最新代码，前端据此刷新预览与代码文件列表
+        return buildAppCodeVO(app, readProjectFiles(dirPath));
+    }
+
+    @Override
+    public AppCodeVO editAppCodeStyle(AppEditStyleRequest editStyleRequest, HttpServletRequest request) {
+        if (editStyleRequest == null || editStyleRequest.getAppId() == null) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "应用 id 不能为空");
+        }
+        if (StrUtil.isBlank(editStyleRequest.getTag())) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "目标元素标签不能为空");
+        }
+        Map<String, String> styleProps = editStyleRequest.getStyle();
+        if (styleProps == null || styleProps.isEmpty()) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "要修改的样式属性不能为空");
+        }
+        // 只允许本人 / 管理员修改；已部署公开用户只能查看、不能改他人代码
+        App app = this.mapper.selectOneById(editStyleRequest.getAppId());
+        if (app == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "应用不存在");
+        }
+        checkCodeEditPermission(app, userService.getLoginUser(request));
+
+        String dirPath = resolveCodeDir(app);
+        Map<String, String> contents = readProjectFiles(dirPath);
+        String html = contents.get("index.html");
+        if (StrUtil.isBlank(html)) {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR,
+                    "该应用还没有可编辑样式的页面代码");
+        }
+        String updated = HtmlStyleEditor.applyStyle(html, editStyleRequest.getTag(),
+                editStyleRequest.getId(), editStyleRequest.getText(),
+                editStyleRequest.getClassName(), styleProps);
+        if (updated == null) {
+            throw new BusinessException(ErrorCode.OPERATION_ERROR,
+                    "没有在代码中找到该元素，可能页面已变化，请刷新页面后重新选中");
+        }
+        FileUtil.writeString(updated, new File(dirPath, "index.html"), StandardCharsets.UTF_8);
+        // 小改动也算一次更新：刷新应用更新时间，让「我的应用」按最近活跃置顶
+        touchAppUpdateTime(app.getId());
+        return buildAppCodeVO(app, readProjectFiles(dirPath));
+    }
+
+    /** 把磁盘代码内容组装成对外 AppCodeVO（html/css/js + 文件名列表 + 文件树），getAppCode / editAppCodeText 复用 */
+    private AppCodeVO buildAppCodeVO(App app, Map<String, String> contents) {
+        AppCodeVO vo = new AppCodeVO();
+        vo.setId(app.getId());
+        vo.setAppName(app.getAppName());
+        vo.setDeployUrl(StrUtil.isNotBlank(app.getDeployKey()) && StrUtil.isNotBlank(deployBaseUrl)
+                ? deployBaseUrl + "/" + app.getDeployKey() + "/" : null);
+        vo.setCodeGenType(app.getCodeGenType());
+        vo.setFileNames(new ArrayList<>(contents.keySet()));
+        vo.setHtmlCode(contents.get("index.html"));
+        vo.setCssCode(contents.get("style.css"));
+        vo.setJsCode(contents.get("script.js"));
+        vo.setFiles(contents.entrySet().stream()
+                .map(e -> {
+                    ProjectFileVO file = new ProjectFileVO();
+                    file.setPath(e.getKey());
+                    file.setContent(e.getValue());
+                    return file;
+                })
+                .collect(Collectors.toList()));
+        return vo;
+    }
+
+    /** 校验修改代码权限：仅应用本人 / 管理员可改（比查看更严，已部署公开用户不可改） */
+    private void checkCodeEditPermission(App app, LoginUserVO loginUser) {
+        boolean isOwner = app.getUserId() != null && app.getUserId().equals(loginUser.getId());
+        boolean isAdmin = "admin".equals(loginUser.getUserRole());
+        if (!isOwner && !isAdmin) {
+            throw new BusinessException(ErrorCode.NO_AUTH_ERROR, "无权限修改该应用代码");
+        }
+    }
+
+    /** 应用有活动（对话 / 改文字等）时刷新更新时间，让「我的应用」按最近活跃置顶。
+     *  MyBatis-Flex 的 update(entity) 默认只更新非空字段，这里只带 id + updateTime，
+     *  不会覆盖应用的其它列；逻辑删除（isDelete）自动拼进 WHERE，已删除应用不受影响。 */
+    private void touchAppUpdateTime(Long appId) {
+        App touch = new App();
+        touch.setId(appId);
+        touch.setUpdateTime(LocalDateTime.now());
+        this.mapper.update(touch);
+    }
+
+    @Override
+    public String downloadAppCode(Long id, HttpServletRequest request) {
+        if (id == null) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "应用 id 不能为空");
+        }
+        App app = this.mapper.selectOneById(id);
+        if (app == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "应用不存在");
+        }
+        checkCodeViewPermission(app, userService.getLoginUser(request), "下载");
+        return resolveCodeDir(app);
+    }
+
+    @Override
     public Page<AppVO> getMyAppPage(AppQueryRequest queryRequest, HttpServletRequest request) {
         LoginUserVO loginUser = userService.getLoginUser(request);
         QueryWrapper queryWrapper = QueryWrapper.create();
@@ -156,7 +331,10 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         if (queryRequest != null && StrUtil.isNotBlank(queryRequest.getName())) {
             queryWrapper.where(App::getAppName).like(queryRequest.getName());
         }
-        queryWrapper.orderBy(App::getCreateTime, false);
+        // 最近活跃优先：按更新时间倒序（对话/部署/编辑都会刷新 updateTime），
+        // 常聊的应用置顶，而不是一直按创建时间排死序。
+        // updateTime 是秒级精度，同秒创建/更新的应用会并列，补 id 倒序做稳定排序（新 id = 后插入）
+        queryWrapper.orderBy(App::getUpdateTime, false).orderBy(App::getId, false);
         return toVOPage(pageByRequest(queryRequest, USER_PAGE_SIZE_LIMIT, queryWrapper));
     }
 
@@ -175,13 +353,18 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
 
     @Override
     public DeployResult deployApp(Long appId, HttpServletRequest request) {
+        return deployAppStream(appId, request, null);
+    }
+
+    @Override
+    public DeployResult deployAppStream(Long appId, HttpServletRequest request, Consumer<String> progress) {
         LoginUserVO loginUser = userService.getLoginUser(request);
         if (appId == null) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "应用 id 不能为空");
         }
         App app = getOwnedApp(appId, loginUser.getId());
-        // 发布文件到 nginx 站点根目录，并拼出访问地址
-        DeployResult result = deployService.deploy(app);
+        // 发布文件到 nginx 站点根目录，并拼出访问地址；进度回调实时转发部署阶段与 npm 输出
+        DeployResult result = deployService.deploy(app, progress);
         // 写回部署标识与部署时间。部署后不自动进入广场，需管理员在「应用管理」设置优先级
         app.setDeployKey(result.deployKey());
         app.setDeployedTime(result.deployedTime());
@@ -191,6 +374,11 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
 
     @Override
     public DeployResult redeployApp(Long appId) {
+        return redeployAppStream(appId, null);
+    }
+
+    @Override
+    public DeployResult redeployAppStream(Long appId, Consumer<String> progress) {
         if (appId == null) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "应用 id 不能为空");
         }
@@ -199,7 +387,7 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
             throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "应用不存在");
         }
         // 复用原 deployKey（访问地址稳定），把最新生成的代码覆盖到 nginx 站点
-        DeployResult result = deployService.deploy(app);
+        DeployResult result = deployService.deploy(app, progress);
         app.setDeployKey(result.deployKey());
         app.setDeployedTime(result.deployedTime());
         this.updateById(app);
@@ -306,6 +494,69 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
             throw new BusinessException(ErrorCode.NO_AUTH_ERROR, "只能操作自己的应用");
         }
         return app;
+    }
+
+    /**
+     * 校验查看/下载代码权限：本人 / 管理员 / 已部署（public 上线）可查看。
+     *
+     * @param app      应用实体
+     * @param loginUser 当前登录用户
+     * @param action   动作描述（"查看" / "下载"），用于错误提示
+     */
+    private void checkCodeViewPermission(App app, LoginUserVO loginUser, String action) {
+        boolean isOwner = app.getUserId() != null && app.getUserId().equals(loginUser.getId());
+        boolean isAdmin = "admin".equals(loginUser.getUserRole());
+        boolean isPublic = StrUtil.isNotBlank(app.getDeployKey());
+        if (!isOwner && !isAdmin && !isPublic) {
+            throw new BusinessException(ErrorCode.NO_AUTH_ERROR, "无权限" + action + "该应用代码");
+        }
+    }
+
+    /**
+     * 定位应用代码保存目录：{root}/{codeGenType}_{appId}（默认 html）。
+     */
+    private String resolveCodeDir(App app) {
+        String bizType = StrUtil.blankToDefault(app.getCodeGenType(), CodeGenTypeEnum.HTML.getValue());
+        return StrUtil.blankToDefault(codeSourceRoot, System.getProperty("user.dir") + "/tmp/code_output")
+                + "/" + bizType + "_" + app.getId();
+    }
+
+    /**
+     * 递归读取代码目录下所有文件，key=项目内相对路径（/ 分隔），value=文件内容。
+     * 目录不存在时返回空 Map。内容从磁盘读取，不消耗 AI token。
+     *
+     * <p>跳过 {@code node_modules}/dist/.git 等构建产物目录：Vue 工程部署后 node_modules
+     * 可能有数百个文件，不跳过会把「查看代码」/项目文件树淹没成依赖清单（Bug A）。
+     */
+    private static final Set<String> PROJECT_SKIP_DIRS = Set.of("node_modules", "dist", ".git");
+
+    private Map<String, String> readProjectFiles(String dirPath) {
+        Map<String, String> contents = new LinkedHashMap<>();
+        File dir = new File(dirPath);
+        if (!FileUtil.isDirectory(dir)) {
+            return contents;
+        }
+        collectProjectFiles(dir, dirPath, contents);
+        return contents;
+    }
+
+    /** 递归收集源码文件（跳过构建产物目录），保持相对路径稳定 */
+    private void collectProjectFiles(File dir, String rootPath, Map<String, String> contents) {
+        File[] files = dir.listFiles();
+        if (files == null) {
+            return;
+        }
+        for (File f : files) {
+            if (f.isDirectory()) {
+                if (PROJECT_SKIP_DIRS.contains(f.getName())) {
+                    continue;
+                }
+                collectProjectFiles(f, rootPath, contents);
+            } else if (f.isFile()) {
+                String relPath = FileUtil.subPath(rootPath, f).replace('\\', '/');
+                contents.put(relPath, FileUtil.readString(f, StandardCharsets.UTF_8));
+            }
+        }
     }
 
     /**

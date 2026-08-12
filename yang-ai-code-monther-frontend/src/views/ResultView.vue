@@ -197,7 +197,7 @@ onMounted(() => {
           <iframe
             class="preview-frame"
             :srcdoc="previewDoc"
-            sandbox="allow-scripts allow-modals allow-same-origin allow-forms"
+            sandbox="allow-scripts allow-modals"
             title="应用预览"
           />
         </div>
@@ -433,8 +433,8 @@ onMounted(() => {
 }
 
 .code-tab.active {
-  background: rgba(22, 119, 255, 0.22);
-  color: #fff;
+  background: rgba(0, 255, 157, 0.15);
+  color: var(--primary);
 }
 
 /* 代码面板标题条里的 antd 文字按钮(浅色主题下默认文字是深色,深色面板上不可读) */

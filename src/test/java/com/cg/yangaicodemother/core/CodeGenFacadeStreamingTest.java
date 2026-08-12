@@ -32,6 +32,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -107,7 +108,9 @@ class CodeGenFacadeStreamingTest {
 
     private void fireComplete(TokenStream tokenStream, String json) {
         ArgumentCaptor<Consumer<ChatResponse>> captor = ArgumentCaptor.forClass(Consumer.class);
-        verify(tokenStream).onCompleteResponse(captor.capture());
+        // atLeastOnce：重试路径会在同一 tokenStream 上注册两次 onCompleteResponse，
+        // 这里取最近一次注册的回调执行（captor.getValue() 返回最后一个捕获值）
+        verify(tokenStream, atLeastOnce()).onCompleteResponse(captor.capture());
         captor.getValue().accept(ChatResponse.builder().aiMessage(AiMessage.from(json)).build());
     }
 
@@ -182,26 +185,30 @@ class CodeGenFacadeStreamingTest {
     // ==================== 异常路径 ====================
 
     @Test
-    void generateHtmlStream_badJson_shouldCallError() {
+    void generateHtmlStream_badJson_shouldRetryThenCallError() {
         TokenStream tokenStream = mockTokenStream();
         when(aiCodeGeneratorService.generateCodeStream(anyString())).thenReturn(tokenStream);
         CallbackCollector callback = new CallbackCollector();
 
         codeGenFacade.generateHtmlStream("博客", callback, APP_ID);
+        // 第一次解析失败会触发一次强约束重试（mock 返回同一 tokenStream）
+        fireComplete(tokenStream, "not a json");
+        // 重试仍失败，重试次数耗尽，此时才回调 onError
         fireComplete(tokenStream, "not a json");
 
         assertNull(callback.result);
-        assertNotNull(callback.error, "非法 JSON 应回调 onError");
+        assertNotNull(callback.error, "非法 JSON 应在重试耗尽后回调 onError");
         codeSaver.verifyNoInteractions();
     }
 
     @Test
-    void generateHtmlStream_blankCode_shouldCallSystemError() {
+    void generateHtmlStream_blankCode_shouldRetryThenCallSystemError() {
         TokenStream tokenStream = mockTokenStream();
         when(aiCodeGeneratorService.generateCodeStream(anyString())).thenReturn(tokenStream);
         CallbackCollector callback = new CallbackCollector();
 
         codeGenFacade.generateHtmlStream("博客", callback, APP_ID);
+        fireComplete(tokenStream, "{\"htmlCode\":\" \",\"description\":\"空\"}");
         fireComplete(tokenStream, "{\"htmlCode\":\" \",\"description\":\"空\"}");
 
         assertNull(callback.result);
@@ -209,6 +216,27 @@ class CodeGenFacadeStreamingTest {
         assertTrue(callback.error instanceof BusinessException);
         assertEquals(ErrorCode.SYSTEM_ERROR.getCode(), ((BusinessException) callback.error).getCode());
         codeSaver.verifyNoInteractions();
+    }
+
+    @Test
+    void generateHtmlStream_firstOutputUnparseable_retrySucceeds() {
+        TokenStream tokenStream = mockTokenStream();
+        when(aiCodeGeneratorService.generateCodeStream(anyString())).thenReturn(tokenStream);
+        codeSaver.when(() -> CodeSaver.saveFiles(any(), anyString(), any()))
+                .thenReturn(new CodeSaveResult(SAVE_DIR, List.of("index.html")));
+        CallbackCollector callback = new CallbackCollector();
+
+        codeGenFacade.generateHtmlStream("博客", callback, APP_ID);
+        // 首次输出无法解析 → 自动重试一次
+        fireComplete(tokenStream, "not a json");
+        // 重试输出合法 JSON → onComplete，代码正常落盘
+        fireComplete(tokenStream, "{\"htmlCode\":\"<html>ok</html>\",\"description\":\"成功\"}");
+
+        assertNull(callback.error);
+        assertNotNull(callback.result);
+        assertEquals("html", callback.result.getCodeGenType());
+        assertEquals("<html>ok</html>", callback.result.getHtmlCode());
+        assertEquals(List.of("index.html"), callback.result.getFileNames());
     }
 
     @Test
@@ -231,7 +259,7 @@ class CodeGenFacadeStreamingTest {
     void generateStream_unknownType_shouldThrowParamsError() {
         CallbackCollector callback = new CallbackCollector();
         BusinessException ex = assertThrows(BusinessException.class,
-                () -> codeGenFacade.generateStream("博客", "vue", callback, APP_ID));
+                () -> codeGenFacade.generateStream("博客", "python", callback, APP_ID));
         assertEquals(ErrorCode.PARAMS_ERROR.getCode(), ex.getCode());
         verifyNoInteractions(aiCodeGeneratorService);
     }

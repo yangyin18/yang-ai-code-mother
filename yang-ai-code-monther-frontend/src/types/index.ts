@@ -16,6 +16,17 @@ export interface CodeFile {
 }
 
 /**
+ * 项目文件(带路径,通用「查看代码」渲染用)。
+ * 快速开发是 index.html 等扁平文件,Vue 深度开发则是 src/App.vue 等嵌套路径。
+ */
+export interface ProjectFile {
+  /** 项目内相对路径,如 index.html / src/App.vue */
+  path: string
+  /** 文件内容 */
+  content: string
+}
+
+/**
  * AI 生成并部署后的应用(对应后端 CodeGenResult + AppVO 的合并)
  */
 export interface GeneratedResult {
@@ -33,8 +44,6 @@ export interface GeneratedResult {
   jsCode: string
   /** 生成的文件名列表 */
   fileNames: string[]
-  /** 文件保存目录(后端绝对路径) */
-  saveDir: string
   /** 已部署到 nginx 的访问地址,如 http://localhost/apps/a1b2c3d4/ */
   deployUrl?: string
 }
@@ -55,8 +64,6 @@ export interface CodeGenPayload {
   jsCode: string
   /** 生成的文件名列表 */
   fileNames: string[]
-  /** 文件保存目录 */
-  saveDir: string
 }
 
 /**

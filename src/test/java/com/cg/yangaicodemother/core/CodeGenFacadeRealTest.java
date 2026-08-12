@@ -2,6 +2,7 @@ package com.cg.yangaicodemother.core;
 
 import com.cg.yangaicodemother.ai.AiCodeGeneratorServiceFactory;
 import com.cg.yangaicodemother.ai.ChatModelConfig;
+import com.cg.yangaicodemother.ai.memory.RedisChatMemoryStore;
 import com.cg.yangaicodemother.service.AppService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -32,6 +33,10 @@ class CodeGenFacadeRealTest {
     /** 门面依赖 AppService，但本测试不校验应用模式，用 mock 占位以满足依赖注入 */
     @MockitoBean
     private AppService appService;
+
+    /** 工厂会创建 AiChatService（依赖 RedisChatMemoryStore），本测试不涉及对话，用 mock 占位 */
+    @MockitoBean
+    private RedisChatMemoryStore redisChatMemoryStore;
 
     @Test
     void generateHtml() {

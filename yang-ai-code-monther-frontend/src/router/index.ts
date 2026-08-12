@@ -40,6 +40,12 @@ const router = createRouter({
       meta: { title: '应用对话' },
     },
     {
+      path: '/project/:appId',
+      name: 'project',
+      component: () => import('@/views/VueProjectView.vue'),
+      meta: { title: 'Vue 项目' },
+    },
+    {
       path: '/conversations',
       name: 'conversations',
       component: () => import('@/views/MyConversationsView.vue'),

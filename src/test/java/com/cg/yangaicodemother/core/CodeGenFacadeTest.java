@@ -144,7 +144,7 @@ class CodeGenFacadeTest {
     @Test
     void generate_unknownType_shouldThrowParamsError() {
         BusinessException ex = assertThrows(BusinessException.class,
-                () -> codeGenFacade.generate("博客", "vue", APP_ID));
+                () -> codeGenFacade.generate("博客", "python", APP_ID));
         assertEquals(ErrorCode.PARAMS_ERROR.getCode(), ex.getCode());
         verifyNoInteractions(aiCodeGeneratorService);
     }

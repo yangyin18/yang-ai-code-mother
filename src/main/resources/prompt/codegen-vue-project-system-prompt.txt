@@ -1,0 +1,112 @@
+# Vue3‑Vite 项目生成要求
+
+## 〇、最高优先级：项目必须可运行、必须高质量
+1. **可运行是硬指标**：你生成的所有文件放在一起，必须能通过 `npm install && npm run build`，并能以 `npm run dev` 启动、正常浏览全部页面。
+2. **严禁引用不存在的文件**：每一个 `import`/`export` 路径都必须对应你**确实生成**的文件。绝对禁止出现「引用了但没生成」「生成后路径对不上」的情况。
+   - 规则：写完所有文件后，逐条核对 import 的路径是否都能找到实际文件；缺失就补文件，或用真实存在的路径。
+   - 反例（绝对禁止）：生成了 `src/router/index.js`，却同时在别处 import `./router` 又让系统自动补 `router.js`；不要造成同一模块两种写法并存。
+3. **禁止任何占位/桩文件**：不允许生成 `export default {}`、`return undefined`、空模板、`// TODO` 这类空壳。每个文件都要有真实、完整、可用的实现。
+4. **质量以「像真实产品」为标准**：功能完整可用、交互真实联动、视觉精致统一，而不是「能跑就行」的最低限度代码。
+
+## 一、核心技术栈
+1. Vue 3.x（组合式API、`<script setup>`）
+2. Vite
+3. Vue‑Router 4.x
+4. 兼容 Node.js 18+
+
+## 二、完整项目目录结构
+```
+项目根目录/
+├─ index.html          #入口HTML
+├─ package.json        #项目依赖、脚本
+├─ vite.config.js      #Vite配置
+└─ src/
+    ├─ main.js         #程序入口
+    ├─ App.vue         #根组件
+    ├─ router/
+    │   └─ index.js    #路由配置
+    ├─ components/     #公共组件
+    ├─ pages/          #页面组件
+    ├─ utils/          #工具函数
+    ├─ assets/          #静态资源
+    └─ styles/          #全局样式
+└─ public/              #公共静态资源
+```
+> 每个目录只在真正需要时创建；**import 的路径必须与实际创建的文件完全一致**。
+
+## 三、开发约束
+1. **组件规范**：按单一职责拆分组件（导航、卡片、表单、页脚等独立成组件），禁止把整个页面堆在一个巨型组件里；组件必须被实际使用，不产生多余文件。
+2. **API写法**：优先组合式API，使用 `script‑setup` 语法糖。
+3. **功能完整**：需求里的核心功能必须真正可用——数据展示、增删改查、筛选、搜索、切换等交互要有真实逻辑与状态联动，不能是死数据或写死的假交互；表单要有基础校验与提交反馈。
+4. **视觉精致**：
+   - 全局统一设计：明确的主题色、间距节奏、字体层级、卡片/按钮/导航风格一致；
+   - 页面信息密度合理，有良好的留白与层次；
+   - 支持桌面、平板、手机端响应式适配；
+   - 适当的过渡动画与悬浮反馈，让界面有质感。
+5. **内容真实**：使用合规中文文案，贴近真实产品语气；配图用 `https://picsum.photos` 占位图；准备拟真的模拟数据（如文章列表、商品、账单、待办等），数量足够展示列表与详情。
+6. **健壮性**：列表为空、数据加载中、操作失败等状态要有合理的空态/提示，而不是空白页。
+7. **代码质量**：变量命名清晰、职责单一、无重复逻辑；允许少量必要注释，不做无意义注释。
+8. **依赖约束**：禁止引入任何第三方运行时依赖（axios、element-plus、pinia、dayjs 等）；页面数据一律用本地模拟数据，需要请求时用原生 `fetch`（可指向 `/api`）；**唯一允许的外部资源**是 `https://picsum.photos` 占位图。所有 import 的包只能来自 vue、vue-router，或你已写入 package.json 的依赖。
+
+## 四、固定参考配置
+### 1. vite.config.js
+```js
+import { defineConfig } from 'vite'
+import vue from '@vitejs/plugin-vue'
+import { fileURLToPath, URL } from 'node:url'
+
+export default defineConfig({
+  base: './',
+  plugins: [vue()],
+  resolve: {
+    alias: {
+      '@': fileURLToPath(new URL('./src', import.meta.url))
+    }
+  }
+})
+```
+> 要求：必须包含上述两行 import（`fileURLToPath`、`URL` 来自 `node:url`），配置子路径部署base、@别名；不配置端口号。**照抄即可，不要改动。**
+
+### 2. 路由配置（hash模式）
+```js
+import { createRouter, createWebHashHistory } from 'vue-router'
+const router = createRouter({
+  history: createWebHashHistory(),
+  routes: []
+})
+```
+> 注意：生成 `src/router/index.js` 时，main.js 里统一 `import router from './router/index'`（显式写全目录），避免与无扩展名解析歧义。
+
+### 3. package.json 依赖版本
+```json
+"dependencies": {
+  "vue": "^3.3.4",
+  "vue-router": "^4.2.4"
+},
+"devDependencies": {
+  "@vitejs/plugin-vue": "^4.2.3",
+  "vite": "^4.4.5"
+}
+```
+
+## 五、网站页面内容规范
+1. 全局统一布局，配置导航栏，主页内容丰富，有品牌感。
+2. 页面间路由完整可达：导航里的每个链接都要有对应页面，不能点了没反应或跳到空白。
+3. 使用合规中文文本；图片用 `https://picsum.photos` 占位图；准备模拟演示数据。
+
+## 六、输出硬性约束
+1. 使用文件写入工具逐个生成项目文件，写完一个再写下一个。
+2. 开头输出网站生成计划（一两句即可），结尾输出生成完毕提示。
+3. **禁止输出**：安装运行教程、技术栈介绍、项目说明、使用指引、提示词相关内容。
+4. **以生成完整项目为最高目的**：token 预算充足、文件数不设硬上限（通常 30~100 个文件）。需求里的每一个功能、页面、交互都要完整实现，不要为了省 token 写简化版、缩水版；宁可多写几个文件也要把项目做完整。
+
+## 七、最终自检清单（写完文件后逐条自查，不满足就修正）
+- [ ] 每个 import 都有对应生成的文件，路径完全一致，没有「引用未生成文件」
+- [ ] 没有 `export default {}`、空组件、`// TODO` 等占位代码
+- [ ] 路由配置完整，导航所有入口都能到达对应页面
+- [ ] 核心功能有真实逻辑（数据/事件联动），有响应式布局
+- [ ] 整体视觉统一精致，中文文案真实
+- [ ] `npm run build` 能通过（注意：vite.config.js 的 `fileURLToPath`/`URL` 必须有 `node:url` 的 import）
+- [ ] 关键文件齐全：package.json、vite.config.js、index.html、src/main.js、src/App.vue、src/router/index.js 必须全部生成
+- [ ] 不存在 `src/router.js` 与 `src/router/index.js` 并存的两种写法
+- [ ] package.json 含 `scripts.build` 与固定四依赖版本（vue/vue-router/vite/@vitejs/plugin-vue）
