@@ -47,6 +47,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 应用接口。
@@ -284,13 +285,25 @@ public class AppController {
 
         SseEmitter emitter = new SseEmitter(600_000L);
 
-        // 流生命周期标记：complete/error/timeout 时置 true，心跳与 onComplete 据此互斥
+        // 客户端是否已断开（关页 / 返回 / abort fetch）：断开后不再推送 SSE，但生成继续在后台跑完并落盘
+        AtomicBoolean clientGone = new AtomicBoolean(false);
+        // 保活心跳是否已停止：首 token 到达或客户端断开后置 true
         AtomicBoolean done = new AtomicBoolean(false);
 
         // 首 token 前的保活心跳：每 5s 推一个 heartbeat 事件，让前端看到连接真实存活。
         // 首 token 一旦到达(message 事件)即取消，避免与代码流抢调度。
         final long[] heartbeatStart = {System.currentTimeMillis()};
-        java.util.concurrent.ScheduledFuture<?> heartbeat = SSE_HEARTBEAT_SCHEDULER.scheduleAtFixedRate(() -> {
+        AtomicReference<ScheduledFuture<?>> heartbeatRef = new AtomicReference<>();
+        // 停心跳（幂等）：客户端断开 / 首 token 到达后调用。只停心跳，绝不中断在途生成——
+        // 用户中途退出后生成仍要继续跑完并保存，回来即可看到结果。
+        Runnable stopHeartbeat = () -> {
+            done.set(true);
+            ScheduledFuture<?> h = heartbeatRef.get();
+            if (h != null) {
+                h.cancel(false);
+            }
+        };
+        ScheduledFuture<?> heartbeat = SSE_HEARTBEAT_SCHEDULER.scheduleAtFixedRate(() -> {
             if (done.get()) {
                 return;
             }
@@ -299,29 +312,33 @@ public class AppController {
                         .name("heartbeat")
                         .data("{\"elapsedMs\":" + (System.currentTimeMillis() - heartbeatStart[0]) + "}"));
             } catch (IOException e) {
-                done.set(true);
-                emitter.completeWithError(e);
+                // 客户端已断开：停心跳即可。生成继续在后台跑，绝不 completeWithError（会再触发 onError 递归）
+                clientGone.set(true);
+                stopHeartbeat.run();
             }
         }, 5, 5, TimeUnit.SECONDS);
+        heartbeatRef.set(heartbeat);
 
-        emitter.onTimeout(() -> {
-            done.set(true);
-            heartbeat.cancel(false);
-            emitter.complete();
-        });
+        // 客户端中途退出（关页 / 返回 / abort fetch）或异步请求超时：连接已死，停心跳、不再推送。
+        // 注意：绝不在这里中断生成——背景任务照常跑完并落盘，这是「退出后继续生成」的关键。
+        emitter.onTimeout(stopHeartbeat);
         emitter.onError(e -> {
-            done.set(true);
-            heartbeat.cancel(false);
-            emitter.complete();
+            // 连接级错误（客户端断开 / flush 失败）：只标记并停心跳。
+            // 绝不能调用 emitter.completeWithError() —— 会再次进入本回调，递归推送。
+            clientGone.set(true);
+            stopHeartbeat.run();
+        });
+        emitter.onCompletion(() -> {
+            clientGone.set(true);
+            stopHeartbeat.run();
         });
 
         // 立即告知前端连接已建立（此时 LLM 首 token 可能还要等几秒到几十秒）
         try {
             emitter.send(SseEmitter.event().name("started").data("{}"));
         } catch (IOException e) {
-            done.set(true);
-            heartbeat.cancel(false);
-            emitter.completeWithError(e);
+            clientGone.set(true);
+            stopHeartbeat.run();
         }
 
         CodeGenStreamCallback callback = new CodeGenStreamCallback() {
@@ -333,47 +350,59 @@ public class AppController {
                 if (StrUtil.isBlank(partialText)) {
                     return;
                 }
-                // 首 token 已到达，心跳没用了
-                done.set(true);
-                heartbeat.cancel(false);
+                // 首 token 已到达，心跳没用了（幂等）
+                stopHeartbeat.run();
+                // 客户端已断开：跳过推送（避免逐块 IOException 噪音），生成继续在后台跑
+                if (clientGone.get()) {
+                    return;
+                }
                 try {
                     emitter.send(SseEmitter.event().name("message").data(partialText));
-                } catch (IOException e) {
-                    emitter.completeWithError(e);
+                } catch (Exception e) {
+                    // 客户端已断开：标记后不再推送，生成继续
+                    clientGone.set(true);
                 }
             }
 
             @Override
             public void onComplete(CodeGenResult result) {
-                done.set(true);
-                heartbeat.cancel(false);
+                // 生成已完成并由门面落盘保存；此处仅收尾 SSE 连接（客户端是否还在都不影响保存结果）
                 try {
                     emitter.send(SseEmitter.event().name("complete").data(result));
+                } catch (Exception ignored) {
+                    // 客户端已断开，推送失败，忽略
+                }
+                try {
                     emitter.complete();
-                } catch (IOException e) {
-                    emitter.completeWithError(e);
+                } catch (IllegalStateException ignored) {
+                    // 客户端断开时容器已 complete 异步请求，忽略
                 }
             }
 
             @Override
             public void onFileWritten(String path) {
+                if (clientGone.get()) {
+                    return;
+                }
                 // Vue 项目模式：每个文件写入后推 file 事件，只带路径不带内容，省传输
                 try {
                     emitter.send(SseEmitter.event()
                             .name("file")
                             .data("{\"path\":\"" + escapeJson(path) + "\"}"));
-                } catch (IOException e) {
-                    done.set(true);
-                    heartbeat.cancel(false);
-                    emitter.completeWithError(e);
+                } catch (Exception e) {
+                    // 客户端已断开：标记后不再推送，文件写入本身已成功、继续生成
+                    clientGone.set(true);
                 }
             }
 
             @Override
             public void onError(Throwable error) {
-                done.set(true);
-                heartbeat.cancel(false);
-                emitter.completeWithError(error);
+                // 生成侧出错：若客户端仍在则推送错误，否则静默收尾
+                try {
+                    emitter.completeWithError(error);
+                } catch (IllegalStateException ignored) {
+                    // 异步请求已结束，忽略
+                }
             }
         };
         // TokenStream 内部异步回调，这里直接启动即可；同步校验异常（应用不存在等）会直接抛出

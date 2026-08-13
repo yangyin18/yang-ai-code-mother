@@ -6,6 +6,7 @@ import dev.langchain4j.agent.tool.Tool;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
 /**
@@ -37,6 +38,9 @@ public class VueProjectTool {
     /** 每个文件写入成功后的回调（SSE 推送 file 事件） */
     private final Consumer<String> onFileWritten;
 
+    /** 生成是否已被取消（如客户端断开连接）：取消后 writeFile 不再落盘，引导模型立即停止 */
+    private final BooleanSupplier cancelled;
+
     /** 已写入的相对路径列表（用于 onComplete 组装结果） */
     private final List<String> writtenPaths = new CopyOnWriteArrayList<>();
 
@@ -44,9 +48,15 @@ public class VueProjectTool {
     private volatile String summary;
 
     public VueProjectTool(String projectDir, VueProjectTokenBudget budget, Consumer<String> onFileWritten) {
+        this(projectDir, budget, onFileWritten, () -> false);
+    }
+
+    public VueProjectTool(String projectDir, VueProjectTokenBudget budget, Consumer<String> onFileWritten,
+                          BooleanSupplier cancelled) {
         this.projectDir = projectDir;
         this.budget = budget;
         this.onFileWritten = onFileWritten;
+        this.cancelled = cancelled != null ? cancelled : () -> false;
     }
 
     /**
@@ -58,6 +68,10 @@ public class VueProjectTool {
      */
     @Tool("把 Vue 项目的一个文件写入磁盘。path 必须是项目内的相对路径（如 src/App.vue、package.json、vite.config.js），禁止使用 .. 或绝对路径。")
     public String writeFile(String path, String content) {
+        // 生成已被取消（客户端断开连接）：拒绝继续落盘，并明确告知模型立即停止
+        if (cancelled.getAsBoolean()) {
+            return "生成已取消：客户端已断开连接。请立即停止生成，不要再写入任何文件，也不要调用 finishProject。";
+        }
         if (path == null || content == null) {
             return "参数错误：path 与 content 不能为空。";
         }

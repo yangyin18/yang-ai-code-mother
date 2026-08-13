@@ -31,6 +31,17 @@ public interface CodeGenStreamCallback {
     void onError(Throwable error);
 
     /**
+     * 生成是否已被取消（如客户端中途断开连接后，调用方主动中断生成）。
+     * 门面在解析 / 落盘 / 加固前会检查；返回 true 时跳过一切副作用（不再保存、不再补桩、不再写 Vue 文件）。
+     * 默认返回 false，普通调用方无需改动。
+     *
+     * @return true 表示生成已取消
+     */
+    default boolean isCancelled() {
+        return false;
+    }
+
+    /**
      * Vue 项目模式下，每个项目文件写入成功后回调（可多次）。
      * HTML / 多文件模式不触发，默认空实现，无需各调用方改动。
      *

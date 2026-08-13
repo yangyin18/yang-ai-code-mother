@@ -247,6 +247,11 @@ public class CodeGenFacade {
 
     private void handleHtmlComplete(ChatResponse response, CodeGenStreamCallback callback, Long appId,
                                     String prompt, int attemptsLeft) {
+        // 客户端中途退出（断开连接）后门面标记取消：不再解析、落盘或推送，及时中断生成
+        if (callback.isCancelled()) {
+            log.info("生成已取消（客户端已断开），跳过 HTML 流式结果保存");
+            return;
+        }
         try {
             // 交给解析器：JSON / Markdown / 裸 HTML 都能处理
             CodeParseResult parsed = CodeParser.parse(response.aiMessage().text(), CodeGenTypeEnum.HTML);
@@ -270,6 +275,11 @@ public class CodeGenFacade {
 
     private void handleMultiFileComplete(ChatResponse response, CodeGenStreamCallback callback, Long appId,
                                          String prompt, int attemptsLeft) {
+        // 客户端中途退出（断开连接）后门面标记取消：不再解析、落盘或推送，及时中断生成
+        if (callback.isCancelled()) {
+            log.info("生成已取消（客户端已断开），跳过多文件流式结果保存");
+            return;
+        }
         try {
             CodeParseResult parsed = CodeParser.parse(response.aiMessage().text(), CodeGenTypeEnum.MULTI_FILE);
             File saveDir = CodeSaver.saveFiles(parsed.files(), CodeGenTypeEnum.MULTI_FILE.getValue(), appId).dir();
@@ -323,7 +333,8 @@ public class CodeGenFacade {
         String prompt = buildPrompt(initPrompt, userMessage);
         String projectDir = prepareVueDir(appId);
         VueProjectTokenBudget budget = new VueProjectTokenBudget(vueMaxTokens, vueMaxFiles);
-        VueProjectTool tool = new VueProjectTool(projectDir, budget, callback::onFileWritten);
+        // 客户端断开后门面标记取消，writeFile 据此拒绝继续落盘，及时中断 Vue 项目生成
+        VueProjectTool tool = new VueProjectTool(projectDir, budget, callback::onFileWritten, callback::isCancelled);
         AiVueProjectService service = buildVueService(tool);
         TokenStream tokenStream = service.generateVueProjectStream(prompt);
         tokenStream
@@ -339,6 +350,11 @@ public class CodeGenFacade {
      */
     private void handleVueComplete(ChatResponse response, CodeGenStreamCallback callback,
                                    String projectDir, VueProjectTool tool) {
+        // 客户端中途退出（断开连接）后门面标记取消：不再加固 / 落盘 / 推送，及时中断生成
+        if (callback.isCancelled()) {
+            log.info("生成已取消（客户端已断开），跳过 Vue 项目结果加固与保存");
+            return;
+        }
         try {
             List<String> fileNames = tool.writtenPaths();
             if (fileNames.isEmpty()) {
