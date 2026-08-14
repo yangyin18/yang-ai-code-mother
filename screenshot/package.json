@@ -1,0 +1,10 @@
+{
+  "name": "yang-ai-cover-screenshot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "用已安装的 Headless Chrome(puppeteer-core) 截取应用对话页，作为「我的应用」封面",
+  "type": "module",
+  "dependencies": {
+    "puppeteer-core": "^24.0.0"
+  }
+}

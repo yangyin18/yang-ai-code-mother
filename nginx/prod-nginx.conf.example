@@ -1,0 +1,45 @@
+# ============================================================
+# 服务器(Ubuntu/Debian)nginx 站点配置示例
+# 适用: 43.131.38.239, 端口 80
+# 使用: 放到 /etc/nginx/sites-available/ 下, 软链到 sites-enabled 后 nginx -s reload
+#   sudo cp prod-nginx.conf.example /etc/nginx/sites-available/yang-ai-code-mother
+#   sudo ln -s /etc/nginx/sites-available/yang-ai-code-mother /etc/nginx/sites-enabled/
+#   sudo nginx -t && sudo systemctl reload nginx
+# ============================================================
+
+server {
+    listen 80;
+    server_name 43.131.38.239;
+
+    # ---- 1) 前端 (Vue build 产物) ----
+    # 前端 npm run build 后, 把 dist/ 内容传到 /var/www/html/frontend/
+    location / {
+        root /var/www/html/frontend;
+        index index.html;
+        # Vue history 路由回退, 刷新任意前端页面不 404
+        try_files $uri $uri/ /index.html;
+    }
+
+    # ---- 2) 后端 API 反向代理 ----
+    # 后端 Spring Boot 端口 8224, context-path=/api
+    location /api/ {
+        proxy_pass http://127.0.0.1:8224/api/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        # AI 生成是 SSE 流式, 必须关缓冲才能实时输出, 并加大超时
+        proxy_buffering off;
+        proxy_read_timeout 300s;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+    }
+
+    # ---- 3) 生成的应用站点 (对应后端 code.deploy.web-root) ----
+    # 后端部署时把文件写入 /var/www/html/apps/{deployKey}/, 这里对外访问
+    location /apps/ {
+        alias /var/www/html/apps/;
+        index index.html;
+        autoindex off;
+    }
+}
