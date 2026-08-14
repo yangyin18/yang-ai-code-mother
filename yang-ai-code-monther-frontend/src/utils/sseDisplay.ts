@@ -98,6 +98,18 @@ export function decodeJsonString(value: string): string {
 }
 
 /**
+ * 剥掉文本里的 Markdown 代码围栏块(```lang\n...\n```),只保留其余正文。
+ * 用于「对话框不展示代码」:即使 AI 回复误输出代码块,气泡也只显示对话正文,
+ * 代码本体在右侧「代码」区 / 预览里看。存储的消息原文不变,这里只影响展示。
+ * 不处理单反引号内联代码,避免误伤正文里的短引用。
+ * 不完整围栏(流式中途/异常,有 ``` 无闭合)从起始 ``` 起删到文本末尾。
+ */
+export function stripFencedCodeBlocks(text: string): string {
+  if (!text || !text.includes('```')) return text
+  return text.replace(/```[\s\S]*?(```|$)/g, '').replace(/\n{3,}/g, '\n\n')
+}
+
+/**
  * 从原始流文本中提取 HTML 代码(用于生成页代码区展示 + iframe 实时预览)。
  *
  * 兼容模型输出的三种形态:

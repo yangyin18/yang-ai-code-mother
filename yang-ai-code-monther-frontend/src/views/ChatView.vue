@@ -15,7 +15,7 @@ import { message } from 'ant-design-vue'
 import { editCodeStyle, editCodeText, getAppCode, getAppDetail, deployAppStream, downloadAppZip } from '@/api/generation'
 import { loadChatHistory, sendChatMessage, type AppUpdatedPayload, type ChatMessage } from '@/api/chat'
 import { useUserStore } from '@/stores/user'
-import { extractHtmlCode } from '@/utils/sseDisplay'
+import { extractHtmlCode, stripFencedCodeBlocks } from '@/utils/sseDisplay'
 import { highlight } from '@/utils/highlight'
 import {
   buildElementPrompt,
@@ -229,6 +229,11 @@ function fmtTime(t?: string): string {
   return `${p(d.getHours())}:${p(d.getMinutes())}`
 }
 
+/** 气泡展示文本:对话框不展示代码,AI 回复渲染前剥掉 Markdown 代码围栏(仅影响展示,原文照常落库) */
+function displayText(m: LocalMessage): string {
+  return m.messageType === 'ai' ? stripFencedCodeBlocks(m.message ?? '') : (m.message ?? '')
+}
+
 /** 进入页面:加载应用详情 + 最新一页对话,并按条件自动发送 initPrompt */
 async function init() {
   historyLoading.value = true
@@ -412,7 +417,7 @@ async function saveVisualEdit() {
   const intended = buildStyleMap()
   const styleChanges: Record<string, string> = {}
   for (const k of ['color', 'padding', 'margin'] as const) {
-    if (intended[k] !== (origStyle[k] ?? '')) styleChanges[k] = intended[k]
+    if (intended[k] !== (origStyle[k] ?? '')) styleChanges[k] = intended[k] ?? ''
   }
   const styleChanged = Object.keys(styleChanges).length > 0
 
@@ -827,7 +832,7 @@ onBeforeUnmount(() => {
             <div class="avatar">{{ m.messageType === 'user' ? '我' : m.messageType === 'error' ? '!' : 'AI' }}</div>
             <div class="bubble-wrap">
               <div class="bubble">
-                <span class="bubble-text">{{ m.message }}</span>
+                <span class="bubble-text">{{ displayText(m) }}</span>
                 <span v-if="m.streaming" class="typing">▋</span>
               </div>
               <div class="bubble-time">{{ fmtTime(m.createTime) }}</div>
