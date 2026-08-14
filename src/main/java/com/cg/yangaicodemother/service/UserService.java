@@ -9,6 +9,9 @@ import com.mybatisflex.core.paginate.Page;
 import com.mybatisflex.core.service.IService;
 import jakarta.servlet.http.HttpServletRequest;
 
+import java.util.Collection;
+import java.util.Map;
+
 /**
  * 用户 服务层。
  *
@@ -78,6 +81,15 @@ public interface UserService extends IService<User> {
      * @return 脱敏后的用户信息，不存在返回 null
      */
     LoginUserVO getUserById(Long id);
+
+    /**
+     * 批量查询用户账号（id → userAccount）。供管理端列表回填拥有者账号，
+     * 一次 in 查询避免逐条查造成的 N+1；不存在的 id 不会出现在结果里。
+     *
+     * @param userIds 用户 id 集合
+     * @return id → 账号 的映射
+     */
+    Map<Long, String> getUserAccountMap(Collection<Long> userIds);
 
     /**
      * 更新用户（管理员）。只更新传入的非空字段。

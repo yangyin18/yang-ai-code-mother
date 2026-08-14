@@ -75,9 +75,8 @@ async function loadMyApps() {
   }
 }
 
-/** 拉取全部已部署应用(应用广场) */
+/** 拉取精选应用(应用广场,公开无需登录,游客也可看) */
 async function loadFeaturedApps() {
-  if (!userStore.isLoggedIn) return
   featuredLoading.value = true
   try {
     featuredApps.value = await listFeaturedApps(1, 12)
@@ -88,11 +87,11 @@ async function loadFeaturedApps() {
   }
 }
 
-/** 登录态变化(或进入首页)时加载"我的应用"与"应用广场" */
-watch(() => userStore.isLoggedIn, (v) => {
-  if (v) {
+/** 进入首页始终加载"应用广场"(公开);"我的应用"仅在登录态加载 */
+watch(() => userStore.isLoggedIn, () => {
+  loadFeaturedApps()
+  if (userStore.isLoggedIn) {
     loadMyApps()
-    loadFeaturedApps()
   }
 }, { immediate: true })
 
@@ -181,7 +180,7 @@ const activeCodeHtml = computed(() => {
 const BUILD_ARTIFACT_PREFIXES = ['node_modules/', 'dist/', '.git/']
 const isBuildArtifact = (p: string) => BUILD_ARTIFACT_PREFIXES.some((s) => p.startsWith(s))
 
-/** 是否可与该应用对话:本人或管理员。广场里别人的应用只能查看代码/打开网站 */
+/** 是否可与该应用对话:本人或管理员。广场里别人的应用只能下载代码/打开网站 */
 function canChatApp(app: MyApp): boolean {
   if (!userStore.userInfo?.id) return false
   if (userStore.userInfo?.userRole === 'admin') return true
@@ -384,8 +383,8 @@ async function handleGenerate() {
       </div>
     </section>
 
-    <!-- 3.5 应用广场:全部已部署应用 -->
-    <section v-if="userStore.isLoggedIn" class="my-apps featured">
+    <!-- 3.5 应用广场:管理员精选应用,公开可见(无需登录) -->
+    <section class="my-apps featured">
       <div class="section-title">
         <span class="section-line" />
         <h2>应用广场</h2>
@@ -413,7 +412,7 @@ async function handleGenerate() {
           <div class="card-actions" @click.stop>
             <button v-if="app.deployUrl" type="button" class="card-btn" @click="openApp(app)">🌐 打开</button>
             <button v-if="canChatApp(app)" type="button" class="card-btn primary" @click="goChat(app)">💬 对话</button>
-            <button type="button" class="card-btn" @click="openCode(app)">📄 查看代码</button>
+            <button v-if="userStore.isLoggedIn" type="button" class="card-btn" @click="handleDownload(app)">📦 下载代码</button>
           </div>
         </div>
       </div>

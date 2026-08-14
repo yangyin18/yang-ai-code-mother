@@ -21,6 +21,7 @@ import { deployApp } from '@/api/generation'
 import { useGenerationStore } from '@/stores/generation'
 import { extractHtmlCode } from '@/utils/sseDisplay'
 import { highlight } from '@/utils/highlight'
+import { downloadCodeFiles } from '@/utils/download'
 import type { CodeFile } from '@/types'
 
 const router = useRouter()
@@ -168,19 +169,10 @@ const previewDoc = computed(() => {
 /** 部署中标记 */
 const deploying = ref(false)
 
-/** 下载全部代码(拼接为一个文本文件) */
+/** 下载全部代码(单文件按原扩展名下载,多文件拼接为 txt) */
 function handleDownload() {
   if (!store.app) return
-  const all = files.value
-    .map((f) => `// ===== ${f.name} =====\n${f.content}`)
-    .join('\n\n')
-  const blob = new Blob([all], { type: 'text/plain;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `${store.app.name}-生成的代码.txt`
-  a.click()
-  URL.revokeObjectURL(url)
+  downloadCodeFiles(store.app.name, files.value)
 }
 
 /** 部署上线:未部署则调后端发布到 nginx,已部署则直接打开站点 */

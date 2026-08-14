@@ -1,5 +1,6 @@
 package com.cg.yangaicodemother.service;
 
+import com.cg.yangaicodemother.model.dto.AppAdminCreateRequest;
 import com.cg.yangaicodemother.model.dto.AppAdminQueryRequest;
 import com.cg.yangaicodemother.model.dto.AppAdminUpdateRequest;
 import com.cg.yangaicodemother.model.dto.AppCreateRequest;
@@ -170,7 +171,29 @@ public interface AppService extends IService<App> {
      */
     DeployResult redeployAppStream(Long appId, Consumer<String> progress);
 
+    /**
+     * 重新部署已部署的应用，带当前请求（用于异步刷新对话页截图封面）。
+     * 与 {@link #redeployAppStream(Long, Consumer)} 逻辑一致，额外在部署成功后
+     * 用请求携带的属主会话 cookie 触发封面截图刷新；request 为 null 时跳过刷新。
+     *
+     * @param appId    应用 id
+     * @param request  当前请求（携带属主登录态），可为 null（仅部署不刷新封面）
+     * @param progress 部署进度回调，可为 null
+     * @return 部署结果（含 deployKey 与访问地址）
+     */
+    DeployResult redeployAppStream(Long appId, HttpServletRequest request, Consumer<String> progress);
+
     // ==================== 管理端：应用管理 ====================
+
+    /**
+     * 新建应用（管理员）。校验与用户侧一致（initPrompt 必填、codeGenType 合法），
+     * 归属当前登录管理员，优先级取请求值（默认 0；&gt;0 即进入应用广场）。
+     *
+     * @param createRequest 创建请求（含优先级）
+     * @param request       HttpServletRequest
+     * @return 新应用 id
+     */
+    Long adminCreateApp(AppAdminCreateRequest createRequest, HttpServletRequest request);
 
     /**
      * 根据 id 删除任意应用（管理员）。逻辑删除。
@@ -181,8 +204,8 @@ public interface AppService extends IService<App> {
     boolean adminDeleteApp(Long id);
 
     /**
-     * 根据 id 更新任意应用（管理员）。支持更新应用名称、应用封面、优先级，
-     * 只更新传入的非空字段。
+     * 根据 id 更新任意应用（管理员）。支持更新应用名称、需求描述(initPrompt)、
+     * 应用封面、优先级，只更新传入的非空字段。
      *
      * @param updateRequest 更新请求
      * @return 是否成功

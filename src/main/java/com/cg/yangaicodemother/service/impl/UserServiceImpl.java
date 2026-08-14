@@ -21,6 +21,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.DigestUtils;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -216,6 +217,19 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
     public boolean deleteUser(Long id) {
         // mybatis-flex 逻辑删除：isDelete 标注了 @Column(isLogicDelete=true)，删后查询自动过滤
         return this.removeById(id);
+    }
+
+    @Override
+    public Map<Long, String> getUserAccountMap(Collection<Long> userIds) {
+        if (userIds == null || userIds.isEmpty()) {
+            return Map.of();
+        }
+        // 批量 in 查询：返回 id → 账号，供管理端列表回填拥有者账号（避免 N+1）
+        return this.mapper.selectListByQuery(
+                        QueryWrapper.create().where(User::getId).in(userIds))
+                .stream()
+                .filter(u -> u.getId() != null && StrUtil.isNotBlank(u.getUserAccount()))
+                .collect(Collectors.toMap(User::getId, User::getUserAccount, (a, b) -> a));
     }
 
     /**

@@ -27,6 +27,10 @@ const DISPLAY_MAX = 14
 const typed = ref('')
 let timer: number | null = null
 
+/** 封面图加载失败(404 / 网络异常等):回落到终端占位,避免卡片显示破图 */
+const imgError = ref(false)
+watch(() => props.cover, () => { imgError.value = false })
+
 function clearTimer() {
   if (timer !== null) {
     window.clearTimeout(timer)
@@ -62,7 +66,17 @@ const h2 = computed(() => (h1.value + 48) % 360)
 
 <template>
   <div class="app-cover">
+    <!-- 已生成对话页截图封面：铺满容器；未设置或加载失败时回落到终端占位 -->
+    <img
+      v-if="cover && !imgError"
+      class="cover-img"
+      :src="cover"
+      alt=""
+      loading="lazy"
+      @error="imgError = true"
+    />
     <div
+      v-else
       class="cover-ph"
       :style="{
         '--h1': h1,
@@ -95,6 +109,16 @@ const h2 = computed(() => (h1.value + 48) % 360)
   background: #060a10;
   /* 让占位内容字号随容器宽度自适应(卡片封面 / 会话小图共用) */
   container-type: inline-size;
+}
+
+/* 对话页截图封面：铺满容器、等比裁切，覆盖在深色底上 */
+.cover-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center top;
+  background: #060a10;
 }
 
 /* 暗色终端占位:低饱和渐变 + 细网格 + 一行 `>_ 应用名` */

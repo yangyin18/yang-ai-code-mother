@@ -41,6 +41,11 @@ public class AppAdminQueryRequest extends PageRequest {
     private Integer priority;
 
     /**
+     * 只看精选（priority &gt; 0，即在应用广场）
+     */
+    private Boolean featuredOnly;
+
+    /**
      * 创建用户 id（精确匹配）
      */
     private Long userId;

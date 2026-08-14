@@ -35,3 +35,12 @@ create table chat_history
     INDEX idx_createTime (createTime),      -- 提升基于时间的查询性能
     INDEX idx_appId_createTime (appId, createTime) -- 游标查询核心索引
 ) comment '对话历史' collate = utf8mb4_unicode_ci;
+
+-- 应用封面图表：封面截图 PNG 字节持久化到 DB，避免只存本机磁盘（tmp 被清 / 换机器就丢）。
+-- app_id 与应用表 1:1，DB 为封面图唯一事实源；截图脚本先写临时文件，校验后转存此处。
+create table app_cover
+(
+    app_id     bigint   not null comment '应用id' primary key,
+    image      longblob null comment '封面截图PNG字节',
+    updateTime datetime default CURRENT_TIMESTAMP not null on update CURRENT_TIMESTAMP comment '更新时间'
+) comment '应用封面图(DB持久化)' collate = utf8mb4_unicode_ci;

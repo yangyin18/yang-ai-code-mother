@@ -235,7 +235,7 @@ public class ChatHistoryController {
                         // 失败只记录日志，不影响已落库的 AI 回复；SSE 由 applyChatUpdateToPreview 收尾关闭。
                         if (!disconnected.get()) {
                             applyChatUpdateToPreview(sendRequest.getAppId(), sendRequest.getMessage(),
-                                    emitter, disconnected);
+                                    emitter, disconnected, request);
                         }
                     } catch (Exception e) {
                         log.error("AI 回复落库失败", e);
@@ -315,7 +315,8 @@ public class ChatHistoryController {
      * @param disconnected 客户端连接断开标记（推送失败时置位）
      */
     private void applyChatUpdateToPreview(Long appId, String userMessage,
-                                          SseEmitter emitter, AtomicBoolean disconnected) {
+                                          SseEmitter emitter, AtomicBoolean disconnected,
+                                          HttpServletRequest request) {
         // appUpdating 只作为「开始应用修改」的信号：不携带任何目录/路径信息，
         // 避免把服务器上的绝对路径暴露给客户端
         try {
@@ -377,7 +378,7 @@ public class ChatHistoryController {
                         String deployUrl = null;
                         App app = appService.getById(appId);
                         if (app != null && StrUtil.isNotBlank(app.getDeployKey())) {
-                            DeployResult deployResult = appService.redeployAppStream(appId, msg -> {
+                            DeployResult deployResult = appService.redeployAppStream(appId, request, msg -> {
                                 // 重新部署（npm install/build）期间把阶段与输出逐行推给前端,实现「部署中一直有字符串反馈」
                                 if (disconnected.get() || StrUtil.isBlank(msg)) {
                                     return;

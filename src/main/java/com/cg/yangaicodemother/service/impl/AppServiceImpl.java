@@ -7,6 +7,7 @@ import com.cg.yangaicodemother.core.editor.HtmlStyleEditor;
 import com.cg.yangaicodemother.exception.BusinessException;
 import com.cg.yangaicodemother.exception.ErrorCode;
 import com.cg.yangaicodemother.mapper.AppMapper;
+import com.cg.yangaicodemother.model.dto.AppAdminCreateRequest;
 import com.cg.yangaicodemother.model.dto.AppAdminQueryRequest;
 import com.cg.yangaicodemother.model.dto.AppAdminUpdateRequest;
 import com.cg.yangaicodemother.model.dto.AppCreateRequest;
@@ -22,6 +23,7 @@ import com.cg.yangaicodemother.model.vo.LoginUserVO;
 import com.cg.yangaicodemother.model.vo.ProjectFileVO;
 import com.cg.yangaicodemother.service.AppService;
 import com.cg.yangaicodemother.service.ChatHistoryService;
+import com.cg.yangaicodemother.service.CoverService;
 import com.cg.yangaicodemother.service.DeployService;
 import com.cg.yangaicodemother.service.UserService;
 import com.mybatisflex.core.paginate.Page;
@@ -83,6 +85,10 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
     /** 删除应用时级联删除该应用的对话历史，避免数据冗余 */
     @Resource
     private ChatHistoryService chatHistoryService;
+
+    /** 应用封面服务：部署 / 重新部署成功后异步刷新对话页截图封面 */
+    @Resource
+    private CoverService coverService;
 
     /** 部署站点公网前缀，用于给 AppVO 拼已部署应用的访问地址 */
     @Value("${code.deploy.base-url:}")
@@ -153,8 +159,9 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         getOwnedApp(id, loginUser.getId());
         // mybatis-flex 逻辑删除：isDelete 标注了 @Column(isLogicDelete=true)，删后查询自动过滤
         boolean result = this.removeById(id);
-        // 关联删除该应用的所有对话历史，避免数据冗余（与删除应用同一事务，失败一并回滚）
+        // 关联删除该应用的所有对话历史与封面记录，避免数据冗余（与删除应用同一事务，失败一并回滚）
         chatHistoryService.removeByAppId(id);
+        coverService.deleteCover(id);
         return result;
     }
 
@@ -369,6 +376,8 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         app.setDeployKey(result.deployKey());
         app.setDeployedTime(result.deployedTime());
         this.updateById(app);
+        // 部署成功后异步刷新对话页截图封面（请求带属主会话 cookie）；失败不影响部署结果
+        coverService.refreshCoverAsync(appId, request);
         return result;
     }
 
@@ -379,6 +388,11 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
 
     @Override
     public DeployResult redeployAppStream(Long appId, Consumer<String> progress) {
+        return redeployAppStream(appId, null, progress);
+    }
+
+    @Override
+    public DeployResult redeployAppStream(Long appId, HttpServletRequest request, Consumer<String> progress) {
         if (appId == null) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "应用 id 不能为空");
         }
@@ -391,10 +405,46 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         app.setDeployKey(result.deployKey());
         app.setDeployedTime(result.deployedTime());
         this.updateById(app);
+        // 对话即改代码后刷新封面（request 非空才触发；服务端内部重载可能没有请求上下文）
+        if (request != null) {
+            coverService.refreshCoverAsync(appId, request);
+        }
         return result;
     }
 
     // ==================== 管理端：应用管理 ====================
+
+    @Override
+    public Long adminCreateApp(AppAdminCreateRequest createRequest, HttpServletRequest request) {
+        // 校验与用户侧 createApp 一致：initPrompt 必填、codeGenType 合法
+        if (createRequest == null || StrUtil.isBlank(createRequest.getInitPrompt())) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "initPrompt 不能为空");
+        }
+        if (StrUtil.isNotBlank(createRequest.getCodeGenType())
+                && CodeGenTypeEnum.getEnumByValue(createRequest.getCodeGenType()) == null) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "非法的代码生成类型");
+        }
+
+        // 归属当前登录管理员，优先级取请求值（默认 0；>0 即进入应用广场）
+        LoginUserVO loginUser = userService.getLoginUser(request);
+        App app = new App();
+        app.setAppName(StrUtil.blankToDefault(createRequest.getAppName(), "未命名应用"));
+        app.setCover(createRequest.getCover());
+        app.setInitPrompt(createRequest.getInitPrompt());
+        app.setCodeGenType(createRequest.getCodeGenType());
+        app.setPriority(createRequest.getPriority() != null ? createRequest.getPriority() : 0);
+        app.setUserId(loginUser.getId());
+        // 显式初始化时间戳：不依赖 DB 默认值，保证列表按 createTime 排序时新应用也有值
+        LocalDateTime now = LocalDateTime.now();
+        app.setCreateTime(now);
+        app.setUpdateTime(now);
+
+        boolean saveResult = this.save(app);
+        if (!saveResult) {
+            throw new BusinessException(ErrorCode.OPERATION_ERROR, "创建失败，数据库异常");
+        }
+        return app.getId();
+    }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -403,8 +453,9 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "应用 id 不能为空");
         }
         boolean result = this.removeById(id);
-        // 关联删除该应用的所有对话历史，避免数据冗余（与删除应用同一事务，失败一并回滚）
+        // 关联删除该应用的所有对话历史与封面记录，避免数据冗余（与删除应用同一事务，失败一并回滚）
         chatHistoryService.removeByAppId(id);
+        coverService.deleteCover(id);
         return result;
     }
 
@@ -420,6 +471,9 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         // 只更新传入的非空字段
         if (StrUtil.isNotBlank(updateRequest.getAppName())) {
             app.setAppName(updateRequest.getAppName());
+        }
+        if (StrUtil.isNotBlank(updateRequest.getInitPrompt())) {
+            app.setInitPrompt(updateRequest.getInitPrompt());
         }
         if (updateRequest.getCover() != null) {
             app.setCover(updateRequest.getCover());
@@ -452,6 +506,10 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         if (queryRequest.getPriority() != null) {
             queryWrapper.where(App::getPriority).eq(queryRequest.getPriority());
         }
+        // 只看精选：priority > 0 即在应用广场
+        if (Boolean.TRUE.equals(queryRequest.getFeaturedOnly())) {
+            queryWrapper.where(App::getPriority).gt(0);
+        }
         if (queryRequest.getUserId() != null) {
             queryWrapper.where(App::getUserId).eq(queryRequest.getUserId());
         }
@@ -467,7 +525,10 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
             queryWrapper.orderBy(App::getCreateTime, false);
         }
         // 管理员分页：每页数量不限，直接用请求里的 pageSize
-        return toVOPage(pageByRequest(queryRequest, Integer.MAX_VALUE, queryWrapper));
+        Page<AppVO> voPage = toVOPage(pageByRequest(queryRequest, Integer.MAX_VALUE, queryWrapper));
+        // 批量回填拥有者账号：只对当前页 userId 集合做一次 in 查询，避免逐条查造成 N+1
+        fillOwnerName(voPage.getRecords());
+        return voPage;
     }
 
     @Override
@@ -476,7 +537,33 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         if (app == null) {
             return null;
         }
-        return toVO(app);
+        AppVO vo = toVO(app);
+        // 详情页也回填拥有者账号（与列表一致，方便管理端展示）
+        fillOwnerName(List.of(vo));
+        return vo;
+    }
+
+    /**
+     * 批量回填 VO 的拥有者账号：收集 userId 集合，一次 in 查询解析成 id → 账号，
+     * 再逐个写回。用户侧列表不调用，保持原有行为（ownerName 为空）。
+     */
+    private void fillOwnerName(List<AppVO> voList) {
+        if (voList == null || voList.isEmpty()) {
+            return;
+        }
+        Set<Long> userIds = voList.stream()
+                .map(AppVO::getUserId)
+                .filter(java.util.Objects::nonNull)
+                .collect(Collectors.toSet());
+        if (userIds.isEmpty()) {
+            return;
+        }
+        Map<Long, String> accountMap = userService.getUserAccountMap(userIds);
+        for (AppVO vo : voList) {
+            if (vo.getUserId() != null) {
+                vo.setOwnerName(accountMap.get(vo.getUserId()));
+            }
+        }
     }
 
     // ==================== 私有工具 ====================

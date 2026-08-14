@@ -37,6 +37,8 @@ export interface AppVO {
   deployedTime?: string
   priority?: number
   userId?: string
+  /** 创建用户账号(仅管理端列表回填,其余列表为空) */
+  ownerName?: string
   createTime?: string
   updateTime?: string
 }
@@ -192,7 +194,8 @@ export async function listMyApps(current = 1, size = 12): Promise<AppListResult>
   const page = await request<Page<AppVO>>({
     url: '/app/my/list/page',
     method: 'GET',
-    params: { current, size },
+    // 后端 PageRequest 读 pageNum/pageSize(非 current/size),按后端字段名传参
+    params: { pageNum: current, pageSize: size },
   })
   return { records: page?.records ?? [], total: Number(page?.totalRow ?? 0) }
 }
@@ -205,7 +208,8 @@ export async function listFeaturedApps(current = 1, size = 12): Promise<AppVO[]>
   const page = await request<Page<AppVO>>({
     url: '/app/featured/list/page',
     method: 'GET',
-    params: { current, size },
+    // 后端 PageRequest 读 pageNum/pageSize,按后端字段名传参
+    params: { pageNum: current, pageSize: size },
   })
   return page?.records ?? []
 }
@@ -549,6 +553,8 @@ export interface AdminAppQuery {
   appName?: string
   userId?: string
   priority?: number
+  /** 只看精选(priority > 0,即在应用广场) */
+  featuredOnly?: boolean
   sortField?: string
   sortOrder?: string
 }
@@ -562,10 +568,29 @@ export async function adminListApps(query: AdminAppQuery = {}): Promise<Page<App
   })
 }
 
-/** 管理员更新应用(名称/封面/优先级) POST /app/admin/update */
+/**
+ * 管理员新建应用卡片 POST /app/admin/create
+ * 归属当前登录管理员,priority>0 即进入应用广场。
+ */
+export async function adminCreateApp(req: {
+  appName: string
+  initPrompt: string
+  codeGenType?: string
+  priority?: number
+  cover?: string
+}): Promise<string> {
+  return request<string>({
+    url: '/app/admin/create',
+    method: 'POST',
+    data: req,
+  })
+}
+
+/** 管理员更新应用(名称/需求描述/封面/优先级,直接填数字) POST /app/admin/update */
 export async function adminUpdateApp(req: {
   id: string
   appName?: string
+  initPrompt?: string
   cover?: string
   priority?: number
 }): Promise<boolean> {

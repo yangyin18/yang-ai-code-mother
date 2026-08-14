@@ -17,6 +17,7 @@ import { loadChatHistory, sendChatMessage, type AppUpdatedPayload, type ChatMess
 import { useUserStore } from '@/stores/user'
 import { extractHtmlCode, stripFencedCodeBlocks } from '@/utils/sseDisplay'
 import { highlight } from '@/utils/highlight'
+import { downloadCodeFiles } from '@/utils/download'
 import {
   buildElementPrompt,
   formatElementLabel,
@@ -678,7 +679,7 @@ function goBack() {
   router.push('/')
 }
 
-/** 下载全部代码(复用生成页逻辑):快速开发拼接为文本文件,Vue 项目直接下整个工程的 ZIP */
+/** 下载全部代码(复用生成页逻辑):快速开发单文件按原扩展名下载、多文件拼接为 txt;Vue 项目直接下整个工程的 ZIP */
 function handleDownload() {
   if (files.value.length === 0) return
   // Vue 是多文件工程,用后端打包的 ZIP 下载(内含完整目录结构)
@@ -686,16 +687,7 @@ function handleDownload() {
     downloadAppZip(appId.value).catch((e) => message.error((e as Error).message || '下载失败'))
     return
   }
-  const all = files.value
-    .map((f) => `// ===== ${f.name} =====\n${f.content}`)
-    .join('\n\n')
-  const blob = new Blob([all], { type: 'text/plain;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `${app.value?.appName || '应用'}-代码.txt`
-  a.click()
-  URL.revokeObjectURL(url)
+  downloadCodeFiles(app.value?.appName || '应用', files.value)
 }
 
 /** 部署上线:已部署则直接打开网站;未部署则流式发布到 nginx 后打开(全程显示真实进度字符串) */

@@ -13,6 +13,7 @@ import com.cg.yangaicodemother.core.CodeGenStreamCallback;
 import com.cg.yangaicodemother.exception.BusinessException;
 import com.cg.yangaicodemother.exception.ErrorCode;
 import com.cg.yangaicodemother.exception.ThrowUtils;
+import com.cg.yangaicodemother.model.dto.AppAdminCreateRequest;
 import com.cg.yangaicodemother.model.dto.AppAdminQueryRequest;
 import com.cg.yangaicodemother.model.dto.AppAdminUpdateRequest;
 import com.cg.yangaicodemother.model.dto.AppCreateRequest;
@@ -21,10 +22,14 @@ import com.cg.yangaicodemother.model.dto.AppEditTextRequest;
 import com.cg.yangaicodemother.model.dto.AppGenerateRequest;
 import com.cg.yangaicodemother.model.dto.AppQueryRequest;
 import com.cg.yangaicodemother.model.dto.AppUpdateRequest;
+import com.cg.yangaicodemother.model.entity.App;
 import com.cg.yangaicodemother.model.vo.AppCodeVO;
 import com.cg.yangaicodemother.model.vo.AppVO;
 import com.cg.yangaicodemother.model.vo.DeployResult;
+import com.cg.yangaicodemother.model.vo.LoginUserVO;
 import com.cg.yangaicodemother.service.AppService;
+import com.cg.yangaicodemother.service.CoverService;
+import com.cg.yangaicodemother.service.UserService;
 import com.mybatisflex.core.paginate.Page;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -33,6 +38,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -60,6 +66,10 @@ public class AppController {
     private final AppService appService;
 
     private final CodeGenFacade codeGenFacade;
+
+    private final UserService userService;
+
+    private final CoverService coverService;
 
     /**
      * 流式心跳调度器：SSE 首 token 可能较慢(模型侧波动)，每 5s 推一个 heartbeat，
@@ -228,7 +238,7 @@ public class AppController {
     }
 
     /**
-     * 分页查询精选的应用列表（用户）。精选 = 管理员手动置顶（priority &gt; 0）的应用，按优先级降序。
+     * 分页查询精选的应用列表（公开，无需登录，应用广场对游客可见）。精选 = 管理员手动置顶（priority &gt; 0）的应用，按优先级降序。
      * 用户部署应用不再自动进入广场，需管理员在「应用管理」设置优先级。
      * 每页最多 20 个，支持按名称模糊查询。
      * GET /app/featured/list/page?pageNum=1&pageSize=20&name=待办
@@ -237,7 +247,6 @@ public class AppController {
      * @return 精选应用分页数据
      */
     @GetMapping("/featured/list/page")
-    @AuthCheck
     public BaseResponse<Page<AppVO>> listFeaturedAppByPage(AppQueryRequest queryRequest) {
         if (queryRequest == null) {
             queryRequest = new AppQueryRequest();
@@ -258,12 +267,15 @@ public class AppController {
      */
     @PostMapping("/generate")
     @AuthCheck
-    public BaseResponse<CodeGenResult> generate(@RequestBody AppGenerateRequest generateRequest) {
+    public BaseResponse<CodeGenResult> generate(@RequestBody AppGenerateRequest generateRequest,
+                                                HttpServletRequest request) {
         ThrowUtils.throwIf(generateRequest == null, ErrorCode.PARAMS_ERROR, "请求参数不能为空");
         ThrowUtils.throwIf(generateRequest.getAppId() == null, ErrorCode.PARAMS_ERROR, "应用 id 不能为空");
         ThrowUtils.throwIf(StrUtil.isBlank(generateRequest.getRequirement()),
                 ErrorCode.PARAMS_ERROR, "需求描述不能为空");
         CodeGenResult result = codeGenFacade.generate(generateRequest.getRequirement(), generateRequest.getAppId());
+        // 代码已生成落盘：异步刷新对话页截图封面，失败不影响生成结果
+        coverService.refreshCoverAsync(generateRequest.getAppId(), request);
         return ResultUtils.success(result);
     }
 
@@ -277,7 +289,8 @@ public class AppController {
      */
     @PostMapping("/generate/stream")
     @AuthCheck
-    public SseEmitter generateStream(@RequestBody AppGenerateRequest generateRequest) {
+    public SseEmitter generateStream(@RequestBody AppGenerateRequest generateRequest,
+                                     HttpServletRequest request) {
         ThrowUtils.throwIf(generateRequest == null, ErrorCode.PARAMS_ERROR, "请求参数不能为空");
         ThrowUtils.throwIf(generateRequest.getAppId() == null, ErrorCode.PARAMS_ERROR, "应用 id 不能为空");
         ThrowUtils.throwIf(StrUtil.isBlank(generateRequest.getRequirement()),
@@ -372,6 +385,8 @@ public class AppController {
                 } catch (Exception ignored) {
                     // 客户端已断开，推送失败，忽略
                 }
+                // 代码已生成落盘：异步刷新对话页截图封面，失败不影响生成结果
+                coverService.refreshCoverAsync(generateRequest.getAppId(), request);
                 try {
                     emitter.complete();
                 } catch (IllegalStateException ignored) {
@@ -556,6 +571,23 @@ public class AppController {
     // ==================== 管理端：应用管理 ====================
 
     /**
+     * 新建应用卡片（管理员）。归属当前登录管理员，priority&gt;0 即进入应用广场。
+     * POST /app/admin/create，body 示例：{"appName": "待办", "initPrompt": "生成一个待办事项网页", "codeGenType": "html", "priority": 5}
+     *
+     * @param createRequest 创建请求（含优先级）
+     * @param request       HttpServletRequest
+     * @return 新应用 id
+     */
+    @PostMapping("/admin/create")
+    @AuthCheck(role = "admin")
+    public BaseResponse<Long> adminCreateApp(@RequestBody AppAdminCreateRequest createRequest,
+                                             HttpServletRequest request) {
+        ThrowUtils.throwIf(createRequest == null, ErrorCode.PARAMS_ERROR);
+        long appId = appService.adminCreateApp(createRequest, request);
+        return ResultUtils.success(appId);
+    }
+
+    /**
      * 根据 id 删除任意应用（管理员）。逻辑删除。
      * POST /app/admin/delete，body 示例：{"id": 1}
      *
@@ -573,8 +605,8 @@ public class AppController {
     }
 
     /**
-     * 根据 id 更新任意应用（管理员）。支持更新应用名称、应用封面、优先级。
-     * POST /app/admin/update，body 示例：{"id": 1, "appName": "新名", "cover": "url", "priority": 5}
+     * 根据 id 更新任意应用（管理员）。支持更新应用名称、需求描述(initPrompt)、应用封面、优先级。
+     * POST /app/admin/update，body 示例：{"id": 1, "appName": "新名", "initPrompt": "新需求", "cover": "url", "priority": 5}
      *
      * @param updateRequest 更新请求
      * @return 是否成功
@@ -620,6 +652,50 @@ public class AppController {
         AppVO appVO = appService.adminGetAppById(id);
         ThrowUtils.throwIf(appVO == null, ErrorCode.NOT_FOUND_ERROR, "应用不存在");
         return ResultUtils.success(appVO);
+    }
+
+    // ==================== 应用封面 ====================
+
+    /**
+     * 获取应用封面（对话页截图 PNG）。
+     * 应用广场（priority>0）或已部署（公开上线）的应用封面公开可见,游客也可查看;
+     * 其余应用封面仅属主 / 管理员可见。
+     * 前端 &lt;img src="/api/app/cover/{appId}"&gt; 同源加载自动携带会话 cookie，
+     * dev（Vite 代理）与 prod（nginx 代理）都通。
+     * GET /app/cover/{appId}
+     *
+     * @param appId   应用 id
+     * @param request HttpServletRequest
+     * @return PNG 图片流
+     */
+    @GetMapping("/cover/{appId}")
+    public ResponseEntity<byte[]> getAppCover(@PathVariable Long appId, HttpServletRequest request) {
+        ThrowUtils.throwIf(appId == null, ErrorCode.PARAMS_ERROR, "应用 id 不能为空");
+        App app = appService.getById(appId);
+        if (app == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "应用不存在");
+        }
+        // 应用广场(priority>0)或已部署(公开上线)的应用封面公开可见,游客也能看;
+        // 其余应用封面仅属主 / 管理员可见,避免未上线应用被任意探测
+        boolean inSquare = app.getPriority() != null && app.getPriority() > 0;
+        boolean isPublic = StrUtil.isNotBlank(app.getDeployKey());
+        if (!inSquare && !isPublic) {
+            LoginUserVO loginUser = userService.getLoginUser(request);
+            boolean isOwner = app.getUserId() != null && app.getUserId().equals(loginUser.getId());
+            boolean isAdmin = "admin".equals(loginUser.getUserRole());
+            if (!isOwner && !isAdmin) {
+                throw new BusinessException(ErrorCode.NO_AUTH_ERROR, "无权限查看该应用封面");
+            }
+        }
+        byte[] coverBytes = coverService.getCoverBytes(appId);
+        if (coverBytes == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "该应用还没有封面");
+        }
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.IMAGE_PNG);
+        // 封面是开发者本人查看，允许浏览器缓存 10 分钟，减少重复截图后的重复请求
+        headers.setCacheControl("max-age=600");
+        return new ResponseEntity<>(coverBytes, headers, HttpStatus.OK);
     }
 
 }

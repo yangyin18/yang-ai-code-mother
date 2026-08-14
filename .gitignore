@@ -3,6 +3,7 @@
 application-local.yml
 application-prod.yml
 tmp
+screenshot/node_modules/
 
 HELP.md
 target/
